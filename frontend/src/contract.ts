@@ -1,5 +1,6 @@
 /**
- * Soroban contract invocation via Freighter (bundled npm package).
+ * Soroban contract invocation via Freighter.
+ * FreelanceContract: create_escrow, complete_job, client_cancel_within_6h, claim_refund_after_hard_deadline
  */
 import { signTransaction as freighterSignTransaction } from "@stellar/freighter-api";
 import {
@@ -8,7 +9,9 @@ import {
   TransactionBuilder,
   Keypair,
   nativeToScVal,
+  scValToNative,
   Address as StellarAddress,
+  Asset,
   Networks,
 } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
@@ -16,13 +19,27 @@ import { Server } from "@stellar/stellar-sdk/rpc";
 const rpcUrl = import.meta.env.VITE_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
 const networkPassphrase = import.meta.env.VITE_NETWORK_PASSPHRASE || Networks.TESTNET;
 
+export function getTokenContractId(
+  assetCode: string,
+  issuerPublicKey: string,
+  passphrase: string = networkPassphrase
+): string {
+  const asset = new Asset(assetCode.trim(), issuerPublicKey.trim());
+  return asset.contractId(passphrase);
+}
+
 let server: Server | null = null;
 function getServer(): Server {
   if (!server) server = new Server(rpcUrl);
   return server;
 }
 
-/** Submit signed XDR to network. */
+export async function getCurrentLedger(): Promise<number> {
+  const s = getServer();
+  const r = await s.getLatestLedger();
+  return Number(r.sequence ?? 0);
+}
+
 export async function submitTransaction(signedXdr: string): Promise<string> {
   const s = getServer();
   const tx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
@@ -40,18 +57,19 @@ export async function invokeContract(
   args: unknown[]
 ): Promise<string> {
   const contract = new Contract(contractId);
-  const server = getServer();
+  const s = getServer();
   const sourceKp = Keypair.fromPublicKey(sourcePublicKey);
   const sourceAccount = new Account(sourceKp.publicKey(), "0");
-  // Convert args to ScVal format
   const convertedArgs = args.map((arg) => {
     if (typeof arg === "string" && (arg.startsWith("G") || arg.startsWith("C"))) {
-      // Treat as Stellar address or contract ID
       return nativeToScVal(StellarAddress.fromString(arg));
+    }
+    if (arg instanceof Uint8Array) {
+      return nativeToScVal(Buffer.from(arg));
     }
     return nativeToScVal(arg);
   });
-  
+
   const op = contract.call(method, ...convertedArgs);
   let tx = new TransactionBuilder(sourceAccount, {
     fee: "10000",
@@ -60,7 +78,7 @@ export async function invokeContract(
     .addOperation(op)
     .setTimeout(180)
     .build();
-  tx = await server.prepareTransaction(tx);
+  tx = await s.prepareTransaction(tx);
   const xdr = tx.toXDR();
   const result = await freighterSignTransaction(xdr, { networkPassphrase });
   if ("error" in result && result.error) throw new Error(result.error);
@@ -68,95 +86,69 @@ export async function invokeContract(
   return submitTransaction(signed);
 }
 
+/** Poll until tx is confirmed, then return retval. */
+async function getTxResult(hash: string): Promise<import("@stellar/stellar-sdk").xdr.ScVal> {
+  const s = getServer();
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const tx = await s.getTransaction(hash);
+    const txAny = tx as { status?: string; result?: { retval?: import("@stellar/stellar-sdk").xdr.ScVal } };
+    if (txAny.status === "SUCCESS" && txAny.result?.retval != null) {
+      return txAny.result.retval;
+    }
+    if (txAny.status === "FAILED") throw new Error("Transaction failed");
+  }
+  throw new Error("Transaction timeout");
+}
+
 export { rpcUrl, networkPassphrase };
 
-/**
- * Helper functions for common contract operations.
- */
+// ---------------------------------------------------------------------------
+// FreelanceContract
+// ---------------------------------------------------------------------------
 
-/** Initialize escrow contract */
-export async function initProject(
+/** create_escrow(client, freelancer, token, amount, soft_deadline) -> u64 job_id. Transfers funds in one tx. */
+export async function createEscrow(
   sourcePublicKey: string,
   contractId: string,
-  businessAddress: string,
+  clientAddress: string,
   freelancerAddress: string,
   tokenId: string,
-  totalAmount: string,
-  advanceAmount: string,
-  deliveryDeadlineTs: number,
-  verificationWindowSecs: number
-): Promise<string> {
-  return invokeContract(sourcePublicKey, contractId, "init_project", [
-    businessAddress,
+  amount: string,
+  softDeadlineTs: number
+): Promise<{ txHash: string; jobId: number }> {
+  const hash = await invokeContract(sourcePublicKey, contractId, "create_escrow", [
+    clientAddress,
     freelancerAddress,
     tokenId,
-    BigInt(totalAmount),
-    BigInt(advanceAmount),
-    BigInt(deliveryDeadlineTs),
-    BigInt(verificationWindowSecs),
+    BigInt(amount),
+    BigInt(softDeadlineTs),
   ]);
+  const retval = await getTxResult(hash);
+  const jobId = Number(scValToNative(retval));
+  return { txHash: hash, jobId };
 }
 
-/** Business deposits 30% advance */
-export async function depositAdvance(
+export async function completeJob(
   sourcePublicKey: string,
   contractId: string,
-  businessAddress: string
+  jobId: number
 ): Promise<string> {
-  return invokeContract(sourcePublicKey, contractId, "deposit_advance", [businessAddress]);
+  return invokeContract(sourcePublicKey, contractId, "complete_job", [jobId]);
 }
 
-/** Deposit remaining 70% before approval */
-export async function depositRemaining(
+export async function clientCancelWithin6h(
   sourcePublicKey: string,
   contractId: string,
-  businessAddress: string
+  jobId: number
 ): Promise<string> {
-  return invokeContract(sourcePublicKey, contractId, "deposit_remaining", [businessAddress]);
+  return invokeContract(sourcePublicKey, contractId, "client_cancel_within_6h", [jobId]);
 }
 
-/** Hex string to Uint8Array (browser-safe, no Buffer) */
-function hexToBytes(hex: string): Uint8Array {
-  const match = hex.match(/.{1,2}/g);
-  if (!match || match.length !== 32) throw new Error("Hash must be 64 hex chars (32 bytes)");
-  return new Uint8Array(match.map((b) => parseInt(b, 16)));
-}
-
-/** Freelancer submits delivery hash */
-export async function submitDeliveryHash(
+export async function claimRefundAfterHardDeadline(
   sourcePublicKey: string,
   contractId: string,
-  freelancerAddress: string,
-  deliveryHashHex: string
+  jobId: number
 ): Promise<string> {
-  const hashBytes = hexToBytes(deliveryHashHex);
-  return invokeContract(sourcePublicKey, contractId, "submit_delivery", [
-    freelancerAddress,
-    hashBytes,
-  ]);
-}
-
-/** Business approves delivery; releases full payment */
-export async function approveDelivery(
-  sourcePublicKey: string,
-  contractId: string,
-  businessAddress: string
-): Promise<string> {
-  return invokeContract(sourcePublicKey, contractId, "approve_delivery", [businessAddress]);
-}
-
-/** Auto-release payment after verification window */
-export async function autoReleaseIfTimeout(
-  sourcePublicKey: string,
-  contractId: string
-): Promise<string> {
-  return invokeContract(sourcePublicKey, contractId, "auto_release_if_timeout", []);
-}
-
-/** Refund advance if freelancer missed deadline */
-export async function refundIfDeadlineMissed(
-  sourcePublicKey: string,
-  contractId: string
-): Promise<string> {
-  return invokeContract(sourcePublicKey, contractId, "refund_if_deadline_missed", []);
+  return invokeContract(sourcePublicKey, contractId, "claim_refund_after_hard_deadline", [jobId]);
 }

@@ -1,9 +1,8 @@
 /**
  * Soroban contract read-only helpers.
- * All fund-moving operations (deposit, approve, refund) are done by the client
- * by signing transactions with Freighter; we only read state for 402 and validation.
+ * FreelanceContract: create_escrow, complete_job, client_cancel_within_6h, claim_refund_after_hard_deadline, get_job
  */
-import { Account, Contract, TransactionBuilder, Networks, Keypair, scValToNative } from "@stellar/stellar-sdk";
+import { Account, Contract, TransactionBuilder, Networks, Keypair, scValToNative, nativeToScVal } from "@stellar/stellar-sdk";
 import { Server, Api } from "@stellar/stellar-sdk/rpc";
 
 const rpcUrl = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -16,23 +15,67 @@ function getServer(): Server {
   return server;
 }
 
-// Dummy source for simulation only (no real tx submitted).
 const dummyKeypair = Keypair.random();
 const dummyAccount = new Account(dummyKeypair.publicKey(), "0");
 
-const STATE_TAG_MAP: Record<string, number> = {
-  Created: 0,
-  AdvanceDeposited: 1,
-  DeliverySubmitted: 2,
-  Completed: 3,
-  Refunded: 4,
+/** JobState: Funded=0, Completed=1, Cancelled=2, Refunded=3 */
+const JOB_STATE_MAP: Record<string, number> = {
+  Funded: 0,
+  Completed: 1,
+  Cancelled: 2,
+  Refunded: 3,
 };
 
+function parseState(stateVal: unknown): number {
+  if (stateVal == null) return -1;
+  if (typeof stateVal === "number") return stateVal;
+  if (typeof stateVal === "string" && JOB_STATE_MAP[stateVal] != null) return JOB_STATE_MAP[stateVal];
+  if (Array.isArray(stateVal) && stateVal[0]) {
+    const s = String(stateVal[0]);
+    if (JOB_STATE_MAP[s] != null) return JOB_STATE_MAP[s];
+  }
+  const obj = stateVal as Record<string, unknown>;
+  const v = obj?.v ?? obj?.value ?? stateVal;
+  if (typeof v === "number") return v;
+  const tag = (obj?.tag ?? obj?.name ?? v) as string | undefined;
+  if (typeof tag === "string" && JOB_STATE_MAP[tag] != null) return JOB_STATE_MAP[tag];
+  return -1;
+}
+
 /**
- * Get project state from contract (state enum: 0=Created, 1=AdvanceDeposited, 2=DeliverySubmitted, 3=Completed, 4=Refunded).
- * Returns 0 (Created) on any error so 402 is returned when we can't confirm deposit.
+ * Get job state from contract. get_job(job_id: u64) -> JobState (Funded=0, Completed=1, Cancelled=2, Refunded=3).
  */
-export async function getProjectState(contractId: string): Promise<number> {
+export async function getJobState(contractId: string, jobId: number): Promise<number> {
+  const s = getServer();
+  const contract = new Contract(contractId);
+  try {
+    const tx = new TransactionBuilder(dummyAccount, {
+      fee: "10000",
+      networkPassphrase,
+    })
+      .addOperation(contract.call("get_job", nativeToScVal(BigInt(jobId))))
+      .setTimeout(180)
+      .build();
+    const result = await s.simulateTransaction(tx);
+    if (Api.isSimulationError(result)) return -1;
+    const retval = (result as Api.SimulateTransactionSuccessResponse).result?.retval;
+    if (retval == null) return -1;
+    const data = scValToNative(retval) as Record<string, unknown>;
+    if (data && typeof data === "object" && data.state != null) return parseState(data.state);
+  } catch {
+    // job not found or contract error
+  }
+  return -1;
+}
+
+/**
+ * Get job details from get_job(job_id).
+ */
+export async function getJobInfo(contractId: string, jobId: number): Promise<{
+  funded_at: number;
+  soft_deadline: number;
+  hard_deadline: number;
+} | null> {
   try {
     const contract = new Contract(contractId);
     const s = getServer();
@@ -40,30 +83,23 @@ export async function getProjectState(contractId: string): Promise<number> {
       fee: "10000",
       networkPassphrase,
     })
-      .addOperation(contract.call("get_project"))
+      .addOperation(contract.call("get_job", nativeToScVal(BigInt(jobId))))
       .setTimeout(180)
       .build();
     const result = await s.simulateTransaction(tx);
-    if (Api.isSimulationError(result)) return 0;
+    if (Api.isSimulationError(result)) return null;
     const retval = (result as Api.SimulateTransactionSuccessResponse).result?.retval;
-    if (retval == null) return 0;
-    // Parse ScVal to native JS (ProjectData struct)
+    if (retval == null) return null;
     const data = scValToNative(retval) as Record<string, unknown>;
-    if (!data || typeof data !== "object") return 0;
-    const stateVal = data.state;
-    if (stateVal == null) return 0;
-    // state can be: number, string tag, [string] (vec), or { tag/v/name }
-    if (typeof stateVal === "number") return stateVal;
-    if (typeof stateVal === "string" && STATE_TAG_MAP[stateVal] != null) return STATE_TAG_MAP[stateVal];
-    if (Array.isArray(stateVal) && stateVal[0] && STATE_TAG_MAP[String(stateVal[0])] != null) return STATE_TAG_MAP[String(stateVal[0])];
-    const obj = stateVal as Record<string, unknown>;
-    const v = obj?.v ?? obj?.value ?? stateVal;
-    if (typeof v === "number") return v;
-    const tag = (obj?.tag ?? obj?.name ?? v) as string | undefined;
-    if (typeof tag === "string" && STATE_TAG_MAP[tag] != null) return STATE_TAG_MAP[tag];
-    return 0;
+    if (!data || typeof data !== "object") return null;
+    const funded_at = (data.funded_at ?? (data as Record<string, unknown>).fundedAt) as number | undefined;
+    const soft_deadline = (data.soft_deadline ?? (data as Record<string, unknown>).softDeadline) as number | undefined;
+    const hard_deadline = (data.hard_deadline ?? (data as Record<string, unknown>).hardDeadline) as number | undefined;
+    if (typeof funded_at !== "number" || typeof soft_deadline !== "number" || typeof hard_deadline !== "number")
+      return null;
+    return { funded_at, soft_deadline, hard_deadline };
   } catch {
-    return 0;
+    return null;
   }
 }
 

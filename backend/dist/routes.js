@@ -6,23 +6,30 @@ import { Router } from "express";
 import multer from "multer";
 import { saveProject, getProject, listProjects } from "./store.js";
 import { hashDeliverable, hashToHex, randomId, verifySignature } from "./crypto.js";
-import { getProjectState } from "./soroban.js";
+import { getJobState, getJobInfo } from "./soroban.js";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = Router();
+const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? "";
 function projectId(req) {
     const id = req.params.id;
     return Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
 }
+/** Inject global escrow contract ID into project for response. */
+function withContractId(project) {
+    const contractId = ESCROW_CONTRACT_ID || project.contractId;
+    return { ...project, contractId };
+}
 // ---------- POST /project/create ----------
-router.post("/project/create", (req, res) => {
+router.post("/project/create", async (req, res) => {
     try {
         const body = req.body;
         const { businessAddress, tokenId, title, description, totalAmount, deliveryDeadlineTs, verificationWindowSecs, signature, publicKey } = body;
-        if (!businessAddress || !tokenId || !title || totalAmount == null || deliveryDeadlineTs == null) {
+        if (!businessAddress || !title || totalAmount == null || deliveryDeadlineTs == null) {
             return res.status(400).json({ error: "Missing required fields" });
         }
-        const total = Number(totalAmount);
-        const advance = Math.floor(total * 0.3);
+        if (!tokenId && !process.env.XLM_TOKEN_ID) {
+            return res.status(400).json({ error: "tokenId required or set XLM_TOKEN_ID in backend .env" });
+        }
         if (signature && publicKey) {
             const message = JSON.stringify({ businessAddress, tokenId, totalAmount });
             if (!verifySignature(message, signature, publicKey)) {
@@ -30,56 +37,61 @@ router.post("/project/create", (req, res) => {
             }
         }
         const id = randomId();
+        const tokenIdToUse = tokenId || process.env.XLM_TOKEN_ID;
+        if (!tokenIdToUse) {
+            return res.status(400).json({ error: "tokenId required or set XLM_TOKEN_ID in backend .env" });
+        }
         const project = {
             id,
             businessAddress,
-            tokenId,
+            tokenId: tokenIdToUse,
             title,
             description: description ?? "",
             totalAmount: String(totalAmount),
-            advanceAmount: String(advance),
+            advanceAmount: String(totalAmount), // 100% upfront (no advance split)
             deliveryDeadlineTs,
             verificationWindowSecs: verificationWindowSecs ?? 259200, // 3 days
             applicants: [],
             createdAt: Date.now(),
         };
-        saveProject(project);
-        return res.status(201).json({ projectId: id, ...project });
+        await saveProject(project);
+        return res.status(201).json({ projectId: id, ...withContractId({ ...project }) });
     }
     catch (e) {
         return res.status(500).json({ error: e.message });
     }
 });
 // ---------- GET /projects ----------
-router.get("/projects", (_req, res) => {
-    return res.json(listProjects());
+router.get("/projects", async (_req, res) => {
+    const list = await listProjects();
+    return res.json(list.map(withContractId));
 });
 // ---------- GET /project/:id ----------
-router.get("/project/:id", (req, res) => {
-    const project = getProject(projectId(req));
+router.get("/project/:id", async (req, res) => {
+    const project = await getProject(projectId(req));
     if (!project)
         return res.status(404).json({ error: "Project not found" });
-    return res.json(project);
+    return res.json(withContractId(project));
 });
 // ---------- POST /project/:id/apply ----------
-router.post("/project/:id/apply", (req, res) => {
+router.post("/project/:id/apply", async (req, res) => {
     const body = req.body;
-    const project = getProject(projectId(req));
+    const project = await getProject(projectId(req));
     if (!project)
         return res.status(404).json({ error: "Project not found" });
     const addr = body.freelancerAddress ?? req.body?.freelancerAddress;
     if (!addr)
         return res.status(400).json({ error: "freelancerAddress required" });
     if (project.applicants.includes(addr))
-        return res.status(200).json(project);
+        return res.status(200).json(withContractId(project));
     project.applicants.push(addr);
-    saveProject(project);
-    return res.status(200).json(project);
+    await saveProject(project);
+    return res.status(200).json(withContractId(project));
 });
 // ---------- POST /project/:id/accept ----------
-router.post("/project/:id/accept", (req, res) => {
+router.post("/project/:id/accept", async (req, res) => {
     const body = req.body;
-    const project = getProject(projectId(req));
+    const project = await getProject(projectId(req));
     if (!project)
         return res.status(404).json({ error: "Project not found" });
     const addr = body.freelancerAddress ?? req.body?.freelancerAddress;
@@ -88,66 +100,94 @@ router.post("/project/:id/accept", (req, res) => {
     if (!project.applicants.includes(addr))
         return res.status(400).json({ error: "Freelancer has not applied" });
     project.freelancerAddress = addr;
-    saveProject(project);
-    return res.json(project);
+    await saveProject(project);
+    return res.json(withContractId(project));
 });
 // ---------- POST /project/:id/set-contract ----------
-router.post("/project/:id/set-contract", (req, res) => {
+router.post("/project/:id/set-contract", async (req, res) => {
     const body = req.body;
-    const project = getProject(projectId(req));
+    const project = await getProject(projectId(req));
     if (!project)
         return res.status(404).json({ error: "Project not found" });
     if (!body.contractId)
         return res.status(400).json({ error: "contractId required" });
-    project.contractId = body.contractId;
-    saveProject(project);
-    return res.json(project);
+    if (!ESCROW_CONTRACT_ID)
+        project.contractId = body.contractId;
+    await saveProject(project);
+    return res.json(withContractId(project));
 });
-// ---------- GET /project/:id/start (x402) ----------
+// ---------- POST /project/:id/set-job ----------
+router.post("/project/:id/set-job", async (req, res) => {
+    const body = req.body;
+    const project = await getProject(projectId(req));
+    if (!project)
+        return res.status(404).json({ error: "Project not found" });
+    if (body.jobId == null || typeof body.jobId !== "number")
+        return res.status(400).json({ error: "jobId (number) required" });
+    project.jobId = body.jobId;
+    await saveProject(project);
+    return res.json(withContractId(project));
+});
+// ---------- GET /project/:id/start ----------
+// FreelanceContract: JobState Funded=0, Completed=1, Cancelled=2, Refunded=3
 router.get("/project/:id/start", async (req, res) => {
     try {
-        const project = getProject(projectId(req));
+        const project = await getProject(projectId(req));
         if (!project)
             return res.status(404).json({ error: "Project not found" });
         if (!project.freelancerAddress)
             return res.status(400).json({ error: "No freelancer accepted yet" });
-        if (!project.contractId)
-            return res.status(400).json({ error: "Contract not deployed yet. Deploy and set contract ID after accepting freelancer." });
-        let state;
-        try {
-            state = await getProjectState(project.contractId);
-        }
-        catch {
-            state = 0;
-        }
-        // 0=Created, 1=AdvanceDeposited, 2=DeliverySubmitted, 3=Completed, 4=Refunded
-        if (state === 1 || state === 2) {
+        const contractId = ESCROW_CONTRACT_ID || project.contractId;
+        if (!contractId)
+            return res.status(400).json({ error: "ESCROW_CONTRACT_ID not set. Deploy contract once and set in backend .env." });
+        // If no jobId yet, client must call create_escrow (funds in one tx)
+        if (!project.jobId) {
             return res.status(200).json({
-                status: "ready",
-                message: state === 1 ? "Advance deposited; work can start." : "Delivery submitted; deposit remaining & approve.",
-                contractId: project.contractId,
+                status: "payment_required",
+                message: "Pay full amount via create_escrow. Client transfers funds in one transaction.",
+                totalAmount: project.totalAmount,
+                asset: project.tokenId,
+                contractAddress: contractId,
                 projectId: project.id,
-                contractState: state,
             });
         }
+        let state;
+        try {
+            state = await getJobState(contractId, project.jobId);
+        }
+        catch {
+            state = -1;
+        }
+        const jobInfo = await getJobInfo(contractId, project.jobId).catch(() => null);
+        // Funded=0: ready for work
+        if (state === 0) {
+            return res.status(200).json({
+                status: "ready",
+                message: "Full amount in escrow; freelancer can deliver. Client can complete_job (on time=100%, late=5% per day penalty) or cancel within 6h.",
+                contractId,
+                projectId: project.id,
+                jobId: project.jobId,
+                contractState: state,
+                jobFundedAt: jobInfo?.funded_at,
+                jobSoftDeadline: jobInfo?.soft_deadline,
+                jobHardDeadline: jobInfo?.hard_deadline,
+            });
+        }
+        // Completed=1, Cancelled=2, Refunded=3
+        if (state === 1)
+            return res.status(200).json({ status: "completed", contractId, projectId: project.id, jobId: project.jobId, contractState: 1 });
+        if (state === 2)
+            return res.status(200).json({ status: "cancelled", contractId, projectId: project.id, jobId: project.jobId, contractState: 2 });
         if (state === 3)
-            return res.status(200).json({ status: "completed", contractId: project.contractId, projectId: project.id, contractState: 3 });
-        if (state === 4)
-            return res.status(400).json({ error: "Project refunded" });
-        res.status(402).set({
-            "Content-Type": "application/json",
-            "X-Payment-Required": "true",
-            "X-Payment-Amount": project.advanceAmount,
-            "X-Payment-Asset": project.tokenId,
-            "X-Payment-Contract": project.contractId,
-        });
-        return res.json({
-            error: "Payment Required",
-            message: "Hiring person must deposit 30% advance to the escrow contract.",
-            advanceAmount: project.advanceAmount,
+            return res.status(200).json({ status: "refunded", contractId, projectId: project.id, jobId: project.jobId, contractState: 3 });
+        return res.status(200).json({
+            status: "payment_required",
+            message: "Pay full amount via create_escrow.",
+            totalAmount: project.totalAmount,
             asset: project.tokenId,
-            contractAddress: project.contractId,
+            contractAddress: contractId,
             projectId: project.id,
+            jobId: project.jobId,
         });
     }
     catch (e) {
@@ -155,9 +195,9 @@ router.get("/project/:id/start", async (req, res) => {
     }
 });
 // ---------- POST /project/:id/submit ----------
-router.post("/project/:id/submit", upload.single("deliverable"), (req, res) => {
+router.post("/project/:id/submit", upload.single("deliverable"), async (req, res) => {
     try {
-        const project = getProject(projectId(req));
+        const project = await getProject(projectId(req));
         if (!project)
             return res.status(404).json({ error: "Project not found" });
         if (!project.contractId)
@@ -188,8 +228,8 @@ router.post("/project/:id/submit", upload.single("deliverable"), (req, res) => {
     }
 });
 // ---------- POST /project/:id/approve ----------
-router.post("/project/:id/approve", (req, res) => {
-    const project = getProject(projectId(req));
+router.post("/project/:id/approve", async (req, res) => {
+    const project = await getProject(projectId(req));
     if (!project)
         return res.status(404).json({ error: "Project not found" });
     return res.json({
@@ -199,8 +239,8 @@ router.post("/project/:id/approve", (req, res) => {
     });
 });
 // ---------- POST /project/:id/refund ----------
-router.post("/project/:id/refund", (req, res) => {
-    const project = getProject(projectId(req));
+router.post("/project/:id/refund", async (req, res) => {
+    const project = await getProject(projectId(req));
     if (!project)
         return res.status(404).json({ error: "Project not found" });
     return res.json({

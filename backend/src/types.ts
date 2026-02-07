@@ -5,6 +5,8 @@ export interface ProjectRecord {
   id: string;
   /** Set after hiring person deploys contract (post-acceptance). */
   contractId?: string;
+  /** Soroban job_id (u64) returned by create_escrow. */
+  jobId?: number;
   businessAddress: string;
   /** Set when hiring person accepts a freelancer. */
   freelancerAddress?: string;
@@ -35,6 +37,10 @@ export interface CreateProjectBody {
 
 export interface SetContractBody {
   contractId: string;
+}
+
+export interface SetJobBody {
+  jobId: number;
 }
 
 export interface ApplyBody {

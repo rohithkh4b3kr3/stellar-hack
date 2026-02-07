@@ -3,10 +3,12 @@
  * - Enforces HTTP 402 for advance payment
  * - Never holds funds; all money is in the Soroban contract
  * - Wallet = identity (signature verification, no signup)
+ * - Set DATABASE_URL for PostgreSQL; otherwise in-memory store.
  */
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import { initDb } from "./db.js";
 import routes from "./routes.js";
 const app = express();
 const PORT = process.env.PORT ?? 5000;
@@ -31,6 +33,20 @@ app.get("/", (_req, res) => {
     });
 });
 app.use(routes);
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+async function start() {
+    if (process.env.DATABASE_URL) {
+        try {
+            await initDb();
+        }
+        catch (e) {
+            console.warn("PostgreSQL init failed, using in-memory store:", e.message);
+        }
+    }
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+    });
+}
+start().catch((e) => {
+    console.error("Startup failed:", e);
+    process.exit(1);
 });
