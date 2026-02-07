@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   listProjects,
   createProject,
@@ -43,12 +43,10 @@ export default function App() {
   const [role, setRole] = useState<Role>(null);
   const [freighterOk, setFreighterOk] = useState(false);
   const [view, setView] = useState<"landing" | "hiring" | "freelancer" | "create" | "project">("landing");
-  const [projectId, setProjectId] = useState("");
   const [project, setProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [startInfo, setStartInfo] = useState<StartResponse | null>(null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
 
   const loadWallet = useCallback(async () => {
     const ok = await isFreighterAvailable();
@@ -61,7 +59,8 @@ export default function App() {
 
   useEffect(() => {
     loadWallet();
-  }, [loadWallet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const connect = async () => {
     setError("");
@@ -87,7 +86,6 @@ export default function App() {
     try {
       const p = await getProject(id);
       setProject(p);
-      setProjectId(id);
       const start = await projectStart(id);
       setStartInfo(start);
       setView("project");
@@ -256,7 +254,6 @@ export default function App() {
       <CreateForm
         wallet={wallet}
         onCreated={(id) => {
-          setProjectId(id);
           openProject(id);
         }}
         onBack={() => setView("hiring")}
@@ -378,29 +375,44 @@ function CreateForm({
 
 function SetContractForm({ projectId, onSet, setError }: { projectId: string; onSet: () => Promise<void>; setError: (s: string) => void }) {
   const [contractId, setContractId] = useState("");
+  const [deploying, setDeploying] = useState(false);
+
+  const handleSet = async () => {
+    setDeploying(true);
+    setError("");
+    try {
+      await setProjectContract(projectId, contractId.trim());
+      await onSet();
+      setError("Contract set! Advance can now be paid.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDeploying(false);
+    }
+  };
+
   return (
     <div className="card">
-      <h3>Set Contract ID</h3>
-      <p style={{ color: "#666", fontSize: "0.875rem" }}>After deploying escrow and calling init_project with accepted freelancer:</p>
-      <div className="form-group" style={{ marginTop: "0.5rem" }}>
+      <h3>Step 2: Deploy & Set Contract</h3>
+      <p style={{ color: "#666", fontSize: "0.875rem", lineHeight: "1.5" }}>
+        You've accepted a freelancer. Now deploy the Soroban escrow contract:
+      </p>
+      <ol style={{ color: "#666", fontSize: "0.875rem", marginTop: "0.5rem" }}>
+        <li>Use stellar.io/docs or soroban-cli: <code style={{background: "#1a1a1a", padding: "2px 4px"}}>soroban contract build</code></li>
+        <li>Deploy with freelancer address: <code style={{background: "#1a1a1a", padding: "2px 4px"}}>soroban contract deploy --wasm target/wasm32-unknown-unknown/release/hello_world.wasm</code></li>
+        <li>Copy the contract ID (C...) and paste below</li>
+        <li>Call: <code style={{background: "#1a1a1a", padding: "2px 4px"}}>contract.init_project(business, freelancer, token, total, advance, deadline, verification_secs)</code></li>
+      </ol>
+      <div className="form-group" style={{ marginTop: "1rem" }}>
         <label>Contract ID</label>
         <input value={contractId} onChange={(e) => setContractId(e.target.value)} placeholder="C..." />
       </div>
       <button
         className="btn"
-        onClick={async () => {
-          setError("");
-          try {
-            await setProjectContract(projectId, contractId.trim());
-            await onSet();
-            setError("");
-          } catch (e) {
-            setError((e as Error).message);
-          }
-        }}
-        disabled={!contractId.trim()}
+        onClick={handleSet}
+        disabled={!contractId.trim() || deploying}
       >
-        Set Contract
+        {deploying ? "Setting..." : "Set Contract"}
       </button>
     </div>
   );
@@ -425,19 +437,31 @@ function ProjectDetail({
 }) {
   const [deliverableFile, setDeliverableFile] = useState<File | null>(null);
   const [hashResult, setHashResult] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const isHiring = wallet === project.businessAddress;
   const isFreelancer = wallet === project.freelancerAddress;
 
   const handleSubmitDelivery = async () => {
     if (!deliverableFile || !isFreelancer) return;
+    setSubmitting(true);
     setError("");
     try {
       const res = await submitDelivery(project.id, deliverableFile);
       setHashResult(res.deliverableHashHex);
-      setError(`Hash: ${res.deliverableHashHex}. Call contract.submit_delivery(freelancer, hash) on ${res.contractId}`);
+      setError(`✓ Deliverable hashed. Call contract.submit_delivery(freelancer, "${res.deliverableHashHex.slice(0, 32)}...") on ${res.contractId}`);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setSubmitting(false);
     }
+  };
+
+  const getStatusDisplay = () => {
+    if (startInfo?.status === "completed") return "✓ Completed";
+    if (startInfo?.status === "ready") return "✓ Ready to Work";
+    if (startInfo?.status === "error") return "✗ Refunded or Error";
+    if (startInfo?.advanceAmount) return "⏳ Waiting for Payment";
+    return "⏳ Not Started";
   };
 
   return (
@@ -446,34 +470,34 @@ function ProjectDetail({
         <span className="title">{project.title}</span>
         <button className="btn secondary" onClick={onBack}>Back</button>
       </header>
+      
       {error && <div className="error-msg">{error}</div>}
+      
       <div className="card">
         <h3>{project.title}</h3>
-        <p>{project.description}</p>
-        <p><strong>Total:</strong> {project.totalAmount} | <strong>30% Advance:</strong> {project.advanceAmount}</p>
-        {project.contractId ? (
-          <p><strong>Contract:</strong> <span className="chip">{project.contractId}</span></p>
-        ) : (
-          <p><strong>Contract:</strong> Not deployed yet. Deploy after accepting a freelancer, then set contract ID below.</p>
-        )}
-        <Countdown deadlineTs={project.deliveryDeadlineTs} label="Delivery due" />
-        {startInfo?.advanceAmount && startInfo?.contractAddress && (
-          <p style={{ marginTop: "0.5rem" }}>402: Pay {startInfo.advanceAmount} to contract, then call deposit_advance(business).</p>
-        )}
-        {startInfo?.status === "ready" && <p style={{ marginTop: "0.5rem" }}>Advance locked. Work can start.</p>}
-        {isHiring && startInfo?.contractAddress && (
-          <button className="btn" onClick={() => setError(`Deposit ${startInfo?.advanceAmount} to ${startInfo?.contractAddress}, then deposit_advance.`)}>
-            Show deposit info
-          </button>
+        <p style={{color: "#999", marginBottom: "0.75rem"}}>{project.description}</p>
+        
+        <div style={{ background: "#0a0a0a", border: "1px solid #222", padding: "0.75rem", marginBottom: "1rem", fontSize: "0.875rem" }}>
+          <div><strong>Total Payment:</strong> {project.totalAmount}</div>
+          <div style={{marginTop: "0.25rem"}}><strong>30% Advance:</strong> {project.advanceAmount}</div>
+          <div style={{marginTop: "0.25rem"}}><strong>Status:</strong> {getStatusDisplay()}</div>
+          <Countdown deadlineTs={project.deliveryDeadlineTs} label="Delivery Deadline" />
+        </div>
+
+        {project.contractId && (
+          <div style={{ background: "#0a0a0a", border: "1px solid #222", padding: "0.75rem", marginBottom: "1rem", fontSize: "0.7rem" }}>
+            <strong>Contract:</strong> <span style={{fontFamily: "monospace"}}>{project.contractId}</span>
+          </div>
         )}
       </div>
 
       {isHiring && project.applicants.length > 0 && (
         <div className="card">
-          <h3>Applicants</h3>
+          <h3>Step 1: Accept Freelancer</h3>
+          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Choose who will do the work:</p>
           {project.applicants.map((addr) => (
             <div key={addr} className="project-row">
-              <span className="chip" title={addr}>{addr.slice(0, 8)}...</span>
+              <span className="chip" title={addr}>{addr.slice(0, 8)}...{addr.slice(-4)}</span>
               <button
                 className="btn"
                 onClick={async () => {
@@ -481,14 +505,14 @@ function ProjectDetail({
                   try {
                     await acceptFreelancer(project.id, addr);
                     await loadProject();
-                    setError("Accepted. Deploy escrow contract (init_project with this freelancer), then add contract ID below.");
+                    setError("");
                   } catch (e) {
                     setError((e as Error).message);
                   }
                 }}
                 disabled={!!project.freelancerAddress}
               >
-                Accept
+                {project.freelancerAddress === addr ? "✓ Accepted" : "Accept"}
               </button>
             </div>
           ))}
@@ -499,27 +523,63 @@ function ProjectDetail({
         <SetContractForm projectId={project.id} onSet={loadProject} setError={setError} />
       )}
 
-      {isFreelancer && !startInfo?.status && startInfo?.advanceAmount && (
+      {isHiring && project.contractId && startInfo?.advanceAmount && (
         <div className="card">
-          <h3>Waiting for Advance</h3>
-          <p>Hiring person must deposit 30% advance ({startInfo.advanceAmount}) to the contract before you can start. You will see &quot;Submit Delivery&quot; when ready.</p>
-        </div>
-      )}
-      {isFreelancer && startInfo?.status === "ready" && (
-        <div className="card">
-          <h3>Submit Delivery</h3>
-          <input type="file" onChange={(e) => setDeliverableFile(e.target.files?.[0] ?? null)} />
-          <button className="btn" onClick={handleSubmitDelivery} disabled={!deliverableFile} style={{ marginTop: "0.5rem" }}>
-            Submit
-          </button>
-          {hashResult && <p style={{ marginTop: "0.5rem", fontSize: "0.75rem", wordBreak: "break-all" }}>{hashResult}</p>}
+          <h3>Step 3: Pay Advance (30%)</h3>
+          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Send ${project.advanceAmount} to the contract:</p>
+          <ol style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>
+            <li>In your wallet, "send" {project.advanceAmount} to {project.contractId}</li>
+            <li>Approve transaction on {project.tokenId}</li>
+            <li>Call <code style={{background: "#1a1a1a", padding: "2px 4px"}}>contract.deposit_advance(business)</code></li>
+            <li>Refresh this page</li>
+          </ol>
+          <button className="btn secondary" onClick={() => loadProject()}>Refresh Status</button>
         </div>
       )}
 
-      {isHiring && project.freelancerAddress && project.contractId && (
+      {isHiring && startInfo?.status === "ready" && project.contractId && (
         <div className="card">
-          <h3>Approve Delivery</h3>
-          <p>Call contract.approve_delivery(business) on {project.contractId}</p>
+          <h3>Step 4: Approve Delivery</h3>
+          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>When freelancer delivers, call:</p>
+          <div style={{background: "#1a1a1a", padding: "0.75rem", fontFamily: "monospace", fontSize: "0.7rem", marginBottom: "0.75rem"}}>
+            contract.approve_delivery(business)
+          </div>
+          <p style={{ color: "#666", fontSize: "0.75rem" }}>OR wait 3 days for auto-release</p>
+        </div>
+      )}
+
+      {isFreelancer && project.freelancerAddress === wallet && !startInfo?.status && startInfo?.advanceAmount && (
+        <div className="card">
+          <h3>⏳ Waiting for Payment</h3>
+          <p>Hiring person must pay the 30% advance (${project.advanceAmount}) before you can submit work.</p>
+          <button className="btn secondary" onClick={() => loadProject()}>Check Status</button>
+        </div>
+      )}
+
+      {isFreelancer && startInfo?.status === "ready" && (
+        <div className="card">
+          <h3>Ready to Work!</h3>
+          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "1rem" }}>Advance is locked. Submit your deliverable:</p>
+          <div className="form-group">
+            <label>Deliverable File</label>
+            <input type="file" onChange={(e) => setDeliverableFile(e.target.files?.[0] ?? null)} />
+          </div>
+          <button className="btn" onClick={handleSubmitDelivery} disabled={!deliverableFile || submitting} style={{ marginBottom: "0.5rem" }}>
+            {submitting ? "Hashing..." : "Submit Deliverable"}
+          </button>
+          {hashResult && (
+            <div style={{ marginTop: "0.75rem", background: "#0a0a0a", border: "1px solid #222", padding: "0.75rem", fontSize: "0.7rem" }}>
+              <p style={{margin: "0 0 0.25rem 0"}}>Hash: <span style={{fontFamily: "monospace"}}>{hashResult}</span></p>
+              <p style={{margin: "0", color: "#666"}}>Copy this to submit_delivery call on the contract</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isFreelancer && startInfo?.status === "completed" && (
+        <div className="card">
+          <h3>✓ Payment Complete</h3>
+          <p>You've been paid. Project is closed.</p>
         </div>
       )}
     </div>

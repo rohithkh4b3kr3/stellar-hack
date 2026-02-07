@@ -187,3 +187,20 @@ input, textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+code {
+  background: #1a1a1a;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-family: "Monaco", "Courier New", monospace;
+  font-size: 0.85em;
+}
+
+ol, ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+li {
+  margin: 0.25rem 0;
+  color: #999;
+}

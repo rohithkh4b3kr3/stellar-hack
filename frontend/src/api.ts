@@ -23,7 +23,6 @@ export async function listProjects(): Promise<Project[]> {
 }
 
 export async function createProject(body: {
-  contractId: string;
   businessAddress: string;
   tokenId: string;
   title: string;
