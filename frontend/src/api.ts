@@ -83,12 +83,15 @@ export interface StartResponse {
   contractAddress?: string;
   projectId?: string;
   error?: string;
+  /** 1=AdvanceDeposited, 2=DeliverySubmitted, 3=Completed */
+  contractState?: number;
 }
 
 export async function projectStart(id: string): Promise<StartResponse> {
   const r = await fetch(`${API}/project/${id}/start`);
   const data = await r.json().catch(() => ({}));
   if (r.status === 402) return { ...data, advanceAmount: data.advanceAmount, contractAddress: data.contractAddress };
+  if (r.status === 400) return { error: data.error || "Start not available" };
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }

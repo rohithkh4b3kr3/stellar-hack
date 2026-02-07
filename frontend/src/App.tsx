@@ -5,14 +5,81 @@ import {
   getProject,
   applyToProject,
   acceptFreelancer,
-  setProjectContract,
   projectStart,
-  submitDelivery,
   type Project,
   type StartResponse,
 } from "./api";
 import { connectFreighter, getPublicKey, isFreighterAvailable } from "./wallet";
 import "./index.css";
+
+// SVG Icons (Professional set)
+const Icons = {
+  Home: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  ),
+  Plus: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  ),
+  Users: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+  Search: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.35-4.35" />
+    </svg>
+  ),
+  LogOut: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  ),
+  ChevronLeft: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  ),
+  Clock: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  ),
+  CheckCircle: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  ),
+  AlertCircle: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  ),
+  ChevronRight: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  ),
+};
+
+type Role = "hiring" | "freelancer" | null;
+type View = "landing" | "home" | "create" | "project" | "applicants" | "search" | "history";
 
 function Countdown({ deadlineTs, label }: { deadlineTs: number; label: string }) {
   const [text, setText] = useState("");
@@ -20,7 +87,7 @@ function Countdown({ deadlineTs, label }: { deadlineTs: number; label: string })
     const update = () => {
       const now = Math.floor(Date.now() / 1000);
       if (now >= deadlineTs) {
-        setText(`${label}: passed`);
+        setText(`${label}: Expired`);
         return;
       }
       const d = deadlineTs - now;
@@ -33,20 +100,25 @@ function Countdown({ deadlineTs, label }: { deadlineTs: number; label: string })
     const t = setInterval(update, 60000);
     return () => clearInterval(t);
   }, [deadlineTs, label]);
-  return <span className={text.includes("passed") ? "timer past" : "timer"}>{text}</span>;
+  
+  const isExpired = text.includes("Expired");
+  return (
+    <span className={`font-medium ${isExpired ? "text-red-600" : "text-neutral-700"}`}>
+      {text}
+    </span>
+  );
 }
-
-type Role = "hiring" | "freelancer" | null;
 
 export default function App() {
   const [wallet, setWallet] = useState<string | null>(null);
   const [role, setRole] = useState<Role>(null);
   const [freighterOk, setFreighterOk] = useState(false);
-  const [view, setView] = useState<"landing" | "hiring" | "freelancer" | "create" | "project">("landing");
+  const [view, setView] = useState<View>("landing");
   const [project, setProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [startInfo, setStartInfo] = useState<StartResponse | null>(null);
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const loadWallet = useCallback(async () => {
     const ok = await isFreighterAvailable();
@@ -94,225 +166,820 @@ export default function App() {
     }
   };
 
-  // Landing
+  const refreshProject = useCallback(async () => {
+    if (!project) return;
+    try {
+      const p = await getProject(project.id);
+      setProject(p);
+      const start = await projectStart(project.id);
+      setStartInfo(start);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [project]);
+
   if (view === "landing") {
     return (
-      <div className="app">
-        <header className="header">
-          <span className="title">Trustless Escrow</span>
-          {wallet ? (
-            <span className="wallet" title={wallet}>{wallet.slice(0, 6)}...{wallet.slice(-4)}</span>
-          ) : freighterOk ? (
-            <button className="btn" onClick={connect}>Connect Wallet</button>
-          ) : (
-            <span className="wallet">Install Freighter</span>
-          )}
-        </header>
-        {error && <div className="error-msg">{error}</div>}
-        <div className="landing">
-          <h1>Trustless Freelance Escrow</h1>
-          <p>Payments enforced by protocol. No trust required.</p>
-          {!wallet ? (
-            <button className="role-btn" onClick={connect}>Connect Wallet to Continue</button>
-          ) : (
-            <div className="role-btns">
-              <button
-                className="role-btn"
-                onClick={() => {
-                  setRole("hiring");
-                  setView("hiring");
-                  loadProjects();
-                }}
-              >
-                Login as Hiring Person
-              </button>
-              <button
-                className="role-btn"
-                onClick={() => {
-                  setRole("freelancer");
-                  setView("freelancer");
-                  loadProjects();
-                }}
-              >
-                Login as Freelancer
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Hiring dashboard
-  if (view === "hiring") {
-    const myProjects = projects.filter((p) => p.businessAddress === wallet);
-    return (
-      <div className="app">
-        <header className="header">
-          <span className="title">Hiring Dashboard</span>
-          <div className="wallet">
-            <span title={wallet ?? ""}>{wallet?.slice(0, 6)}...{wallet?.slice(-4)}</span>
-            <button className="btn secondary" style={{ marginLeft: "0.5rem" }} onClick={() => setView("landing")}>Switch Role</button>
-          </div>
-        </header>
-        {error && <div className="error-msg">{error}</div>}
-        <div className="card">
-          <h3>My Projects</h3>
-          {myProjects.length === 0 ? (
-            <p style={{ color: "#666" }}>No projects yet. Create one below.</p>
-          ) : (
-            myProjects.map((p) => (
-              <div key={p.id} className="project-row">
-                <div>
-                  <strong>{p.title}</strong>
-                  <span style={{ marginLeft: "0.5rem", color: "#666" }}>{p.totalAmount} / 30% advance: {p.advanceAmount}</span>
-                </div>
-                <button className="btn" onClick={() => openProject(p.id)}>Open</button>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="card">
-          <button className="btn" onClick={() => setView("create")}>Post Project</button>
-        </div>
-      </div>
-    );
-  }
-
-  // Freelancer dashboard
-  if (view === "freelancer") {
-    const openProjects = projects.filter((p) => !p.freelancerAddress || p.freelancerAddress === wallet);
-    const myAccepted = projects.filter((p) => p.freelancerAddress === wallet);
-    return (
-      <div className="app">
-        <header className="header">
-          <span className="title">Freelancer Dashboard</span>
-          <div className="wallet">
-            <span title={wallet ?? ""}>{wallet?.slice(0, 6)}...{wallet?.slice(-4)}</span>
-            <button className="btn secondary" style={{ marginLeft: "0.5rem" }} onClick={() => setView("landing")}>Switch Role</button>
-          </div>
-        </header>
-        {error && <div className="error-msg">{error}</div>}
-        <div className="card">
-          <h3>My Active Projects</h3>
-          {myAccepted.length === 0 ? (
-            <p style={{ color: "#666" }}>None. Apply to projects below.</p>
-          ) : (
-            myAccepted.map((p) => (
-              <div key={p.id} className="project-row">
-                <div>
-                  <strong>{p.title}</strong>
-                  <span style={{ marginLeft: "0.5rem", color: "#666" }}>{p.totalAmount}</span>
-                </div>
-                <button className="btn" onClick={() => openProject(p.id)}>Open</button>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="card">
-          <h3>Open Projects</h3>
-          {openProjects.filter((p) => !p.freelancerAddress).length === 0 ? (
-            <p style={{ color: "#666" }}>No open projects.</p>
-          ) : (
-            openProjects
-              .filter((p) => !p.freelancerAddress)
-              .map((p) => (
-                <div key={p.id} className="project-row">
-                  <div>
-                    <strong>{p.title}</strong>
-                    <span style={{ marginLeft: "0.5rem", color: "#666" }}>{p.totalAmount}</span>
-                    <Countdown deadlineTs={p.deliveryDeadlineTs} label="Due" />
-                  </div>
-                  <button
-                    className="btn"
-                    onClick={async () => {
-                      if (!wallet) return;
-                      setError("");
-                      try {
-                        await applyToProject(p.id, wallet);
-                        setError("Applied.");
-                        loadProjects();
-                      } catch (e) {
-                        setError((e as Error).message);
-                      }
-                    }}
-                    disabled={p.applicants.includes(wallet ?? "")}
-                  >
-                    {p.applicants.includes(wallet ?? "") ? "Applied" : "Apply"}
-                  </button>
-                </div>
-              ))
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Create project
-  if (view === "create") {
-    return (
-      <CreateForm
+      <LandingPage
         wallet={wallet}
-        onCreated={(id) => {
-          openProject(id);
-        }}
-        onBack={() => setView("hiring")}
-        setError={setError}
+        freighterOk={freighterOk}
+        connect={connect}
+        setRole={setRole}
+        setView={setView}
         loadProjects={loadProjects}
+        error={error}
+        setError={setError}
       />
     );
   }
 
-  // Project detail
-  if (view === "project" && project) {
+  if (role && wallet) {
     return (
-      <ProjectDetail
-        project={project}
-        startInfo={startInfo}
-        wallet={wallet}
-        error={error}
-        onBack={() => {
-          setView(role === "hiring" ? "hiring" : "freelancer");
-          setProject(null);
-          setStartInfo(null);
-          loadProjects();
-        }}
-        setError={setError}
-        loadProject={async () => {
-          const p = await getProject(project.id);
-          setProject(p);
-        }}
-      />
+      <div className="flex h-screen bg-white overflow-hidden">
+        <Sidebar role={role} view={view} setView={setView} setRole={setRole} wallet={wallet} />
+        <main className="flex-1 flex flex-col overflow-hidden">
+          <TopBar wallet={wallet} />
+          {error && <ErrorBar error={error} onClose={() => setError("")} />}
+          <div className="flex-1 overflow-y-auto">
+            {view === "home" && (
+              <HomeView
+                role={role}
+                projects={projects}
+                wallet={wallet}
+                loadProjects={loadProjects}
+                openProject={openProject}
+              />
+            )}
+
+            {view === "create" && (
+              <CreateProjectView
+                wallet={wallet}
+                setView={setView}
+                setError={setError}
+                loadProjects={loadProjects}
+                openProject={openProject}
+              />
+            )}
+
+            {view === "project" && project && (
+              <ProjectDetailView
+                project={project}
+                startInfo={startInfo}
+                wallet={wallet}
+                role={role}
+                setError={setError}
+                refreshProject={refreshProject}
+                goBack={() => setView("home")}
+              />
+            )}
+
+            {view === "applicants" && (
+              <ApplicantsView
+                projects={projects}
+                wallet={wallet}
+                setError={setError}
+                loadProjects={loadProjects}
+              />
+            )}
+
+            {view === "search" && (
+              <SearchView
+                projects={projects}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                openProject={openProject}
+              />
+            )}
+
+            {view === "history" && (
+              <HistoryView
+                projects={projects}
+                wallet={wallet}
+                role={role}
+                openProject={openProject}
+              />
+            )}
+          </div>
+        </main>
+      </div>
     );
   }
 
   return null;
 }
 
-function CreateForm({
+// ============================================================================
+// COMPONENTS
+// ============================================================================
+
+function Sidebar({ role, view, setView, setRole, wallet }: { role: string; view: View; setView: (v: View) => void; setRole: (r: Role) => void; wallet: string }) {
+  return (
+    <aside className="w-64 bg-neutral-900 text-white flex flex-col border-r border-neutral-800">
+      <div className="p-6 border-b border-neutral-800 flex items-center gap-3 cursor-pointer hover:bg-neutral-800 transition-colors">
+        <div className="w-10 h-10 bg-white text-neutral-900 rounded-lg flex items-center justify-center font-bold text-lg">
+          E
+        </div>
+        <h2 className="text-xl font-bold">gigX</h2>
+      </div>
+
+      <nav className="flex-1 py-8 space-y-1 px-3">
+        <NavItem icon={<Icons.Home />} label="Home" active={view === "home"} onClick={() => setView("home")} />
+        {role === "hiring" && (
+          <>
+            <NavItem icon={<Icons.Plus />} label="Create Project" active={view === "create"} onClick={() => setView("create")} />
+            <NavItem
+              icon={<Icons.Users />}
+              label="Applicants"
+              active={view === "applicants"}
+              onClick={() => setView("applicants")}
+            />
+          </>
+        )}
+        <NavItem icon={<Icons.Search />} label="Browse" active={view === "search"} onClick={() => setView("search")} />
+        <NavItem icon={<Icons.Clock />} label="History" active={view === "history"} onClick={() => setView("history")} />
+      </nav>
+
+      <div className="p-4 border-t border-neutral-800 space-y-3">
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-neutral-800">
+          <div className="w-10 h-10 rounded-full bg-neutral-600 flex items-center justify-center text-xs font-bold text-white">
+            {wallet.slice(0, 2).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-bold text-neutral-300 uppercase tracking-wide">{role === "hiring" ? "Manager" : "Freelancer"}</div>
+            <div className="text-xs text-neutral-400 truncate font-mono" title={wallet}>
+              {wallet.slice(0, 8)}...
+            </div>
+          </div>
+        </div>
+        <button
+          className="w-full flex items-center gap-2 px-3 py-2 text-neutral-300 hover:text-white text-xs font-bold uppercase tracking-wide transition-colors duration-200 hover:bg-neutral-800 rounded-lg"
+          onClick={() => {
+            setRole(null);
+            setView("landing");
+          }}
+          title="Switch role"
+        >
+          <Icons.LogOut />
+          <span>Switch Role</span>
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-semibold text-sm transition-all duration-200 ${
+        active
+          ? "bg-white text-neutral-900 shadow-md"
+          : "text-neutral-300 hover:bg-neutral-800 hover:text-white active:bg-neutral-700"
+      }`}
+      onClick={onClick}
+    >
+      <span className="flex items-center justify-center w-5 h-5">{icon}</span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function TopBar({ wallet }: { wallet: string }) {
+  return (
+    <div className="h-16 border-b border-neutral-200 flex items-center justify-between px-8 bg-white shadow-sm">
+      <h1 className="text-xl font-bold text-neutral-900 tracking-tight">gigX</h1>
+      <div className="px-4 py-2 bg-neutral-100 text-neutral-700 rounded-lg text-xs font-bold uppercase tracking-wide">
+        {wallet.slice(-6)}
+      </div>
+    </div>
+  );
+}
+
+function ErrorBar({ error, onClose }: { error: string; onClose: () => void }) {
+  return (
+    <div className="bg-red-50 border-b border-red-200 px-8 py-4 flex items-center justify-between text-red-700 shadow-sm animate-in slide-in-from-top duration-300">
+      <div className="flex items-center gap-3">
+        <div className="flex-shrink-0">
+          <Icons.AlertCircle />
+        </div>
+        <span className="font-medium text-sm">{error}</span>
+      </div>
+      <button
+        onClick={onClose}
+        className="text-red-500 hover:text-red-700 hover:bg-red-100 rounded-lg px-2 py-1 font-bold transition-all duration-200 text-lg flex-shrink-0"
+        aria-label="Close error message"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function LandingPage({
   wallet,
-  onCreated,
-  onBack,
-  setError,
+  freighterOk,
+  connect,
+  setRole,
+  setView,
   loadProjects,
+  error,
 }: {
   wallet: string | null;
-  onCreated: (id: string) => void;
-  onBack: () => void;
+  freighterOk: boolean;
+  connect: () => Promise<void>;
+  setRole: (r: Role) => void;
+  setView: (v: View) => void;
+  loadProjects: () => Promise<void>;
+  error: string;
+  setError: (s: string) => void;
+}) {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-neutral-900 to-neutral-800 flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl p-12">
+        {/* Header */}
+        <div className="text-center mb-16">
+          <div className="w-20 h-20 bg-neutral-900 text-white rounded-2xl flex items-center justify-center text-4xl font-bold mx-auto mb-6">
+            E
+          </div>
+          <h1 className="text-4xl font-bold text-neutral-900 mb-3">gigX</h1>
+          <p className="text-lg text-neutral-600 max-w-2xl mx-auto">
+            Smart contract-enforced payments. Secure and transparent.
+          </p>
+        </div>
+
+        {/* Features */}
+        {!wallet && (
+          <div className="grid md:grid-cols-3 gap-6 mb-12">
+            <Feature
+              title="Secure"
+              description="Funds locked in smart contract"
+            />
+            <Feature
+              title="Transparent"
+              description="All transactions on-chain"
+            />
+            <Feature
+              title="Decentralized"
+              description="No central authority"
+            />
+          </div>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="mb-8 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
+            <Icons.AlertCircle />
+            <span className="font-medium">{error}</span>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="mt-10 space-y-4">
+          {!wallet || !freighterOk ? (
+            <>
+              <button
+                className="btn-primary w-full py-3 text-lg font-semibold"
+                onClick={connect}
+              >
+                {freighterOk ? "Connect Wallet" : "Install Freighter"}
+              </button>
+              <p className="text-center text-sm text-neutral-600">
+                Get testnet tokens at{" "}
+                <a href="https://lab.stellar.org" target="_blank" rel="noopener noreferrer" className="text-neutral-900 font-semibold hover:underline">
+                  lab.stellar.org
+                </a>
+              </p>
+            </>
+          ) : (
+            <>
+              <button
+                className="btn-primary w-full py-3 text-lg font-semibold"
+                onClick={() => {
+                  setRole("hiring");
+                  setView("home");
+                  loadProjects();
+                }}
+              >
+                Hire Freelancers
+              </button>
+              <button
+                className="btn-secondary w-full py-3 text-lg font-semibold"
+                onClick={() => {
+                  setRole("freelancer");
+                  setView("home");
+                  loadProjects();
+                }}
+              >
+                Find Work
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Feature({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="p-6 bg-neutral-50 rounded-xl text-center">
+      <h3 className="text-lg font-bold text-neutral-900 mb-2">{title}</h3>
+      <p className="text-neutral-600 text-sm">{description}</p>
+    </div>
+  );
+}
+
+function HomeView({
+  role,
+  projects,
+  wallet,
+  openProject,
+}: {
+  role: string;
+  projects: Project[];
+  wallet: string;
+  loadProjects: () => void;
+  openProject: (id: string) => void;
+}) {
+  const myProjects = projects.filter((p) => p.businessAddress === wallet);
+  const myActiveProjects = projects.filter((p) => p.freelancerAddress === wallet);
+  const appliedProjects = projects.filter((p) => p.applicants.includes(wallet));
+  const openProjects = projects.filter((p) => !p.freelancerAddress);
+
+  return (
+    <div className="p-10 max-w-7xl mx-auto">
+      {role === "hiring" && (
+        <>
+          <Section title="My Projects" count={myProjects.length}>
+            {myProjects.length === 0 ? (
+              <EmptyState
+                title="No projects"
+                description="Create a project to get started"
+              />
+            ) : (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {myProjects.map((p) => (
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    wallet={wallet}
+                    onClick={() => openProject(p.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <Section title="Overview">
+            <StatsGrid projects={myProjects} />
+          </Section>
+        </>
+      )}
+
+      {role === "freelancer" && (
+        <>
+          <Section title="Active Assignments" count={myActiveProjects.length}>
+            {myActiveProjects.length === 0 ? (
+              <EmptyState
+                title="No assignments"
+                description="Browse and apply to available projects"
+              />
+            ) : (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {myActiveProjects.map((p) => (
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    wallet={wallet}
+                    onClick={() => openProject(p.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title="Recommended for You"
+            count={openProjects.filter((p) => !appliedProjects.includes(p)).length}
+          >
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {openProjects
+                .filter((p) => !appliedProjects.includes(p))
+                .slice(0, 6)
+                .map((p) => (
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    wallet={wallet}
+                    onClick={() => openProject(p.id)}
+                  />
+                ))}
+            </div>
+          </Section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+  return (
+    <section className="mb-16 pt-4">
+      <div className="flex items-center gap-4 mb-8">
+        <h2 className="text-3xl font-bold text-neutral-900 tracking-tight">{title}</h2>
+        {count !== undefined && <span className="inline-flex items-center px-3 py-1.5 text-xs font-bold bg-neutral-100 text-neutral-700 rounded-full">{count}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ProjectCard({
+  project,
+  wallet,
+  onClick,
+}: {
+  project: Project;
+  wallet: string;
+  onClick: () => void;
+}) {
+  const isYourProject = project.businessAddress === wallet;
+  const isApplied = project.applicants.includes(wallet);
+  const isAccepted = project.freelancerAddress === wallet;
+
+  const getStatus = () => {
+    if (project.contractId) return "Active";
+    if (isAccepted) return "Accepted";
+    if (isApplied) return "Applied";
+    if (isYourProject) return "Posted";
+    return "Open";
+  };
+
+  const getStatusColor = () => {
+    if (project.contractId) return "bg-green-100 text-green-700";
+    if (isAccepted) return "bg-blue-100 text-blue-700";
+    if (isApplied) return "bg-yellow-100 text-yellow-700";
+    if (isYourProject) return "bg-neutral-100 text-neutral-700";
+    return "bg-neutral-100 text-neutral-700";
+  };
+
+  const estimatedDaysLeft = Math.max(
+    0,
+    Math.ceil((project.deliveryDeadlineTs - Math.floor(Date.now() / 1000)) / 86400)
+  );
+
+  return (
+    <div
+      className="project-card p-6 bg-white border border-neutral-200 rounded-lg cursor-pointer hover:shadow-lg hover:border-neutral-300 transition-all duration-300"
+      onClick={onClick}
+    >
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <h3 className="font-bold text-lg text-neutral-900 line-clamp-2 flex-1">
+          {project.title}
+        </h3>
+        <span className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ${getStatusColor()}`}>
+          {getStatus()}
+        </span>
+      </div>
+
+      <p className="text-neutral-600 text-sm mb-5 line-clamp-2 min-h-[40px]">
+        {project.description}
+      </p>
+
+      <div className="grid grid-cols-3 gap-4 text-sm pt-4 border-t border-neutral-200">
+        <div>
+          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wide mb-1">Budget</p>
+          <p className="font-bold text-neutral-900">${project.totalAmount}</p>
+        </div>
+        <div>
+          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wide mb-1">Deadline</p>
+          <p className="font-bold text-neutral-900">{estimatedDaysLeft}d</p>
+        </div>
+        <div>
+          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wide mb-1">Applied</p>
+          <p className="font-bold text-neutral-900">{project.applicants.length}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatsGrid({ projects }: { projects: Project[] }) {
+  const total = projects.reduce((sum, p) => sum + Number(p.totalAmount || 0), 0);
+  const active = projects.filter((p) => p.contractId).length;
+  const completed = projects.filter((p) => p.contractId).length;
+
+  return (
+    <div className="grid md:grid-cols-3 gap-6">
+      <StatCard label="Total Budget" value={`$${total}`} />
+      <StatCard label="Active Contracts" value={String(active)} />
+      <StatCard label="Completed" value={String(completed)} />
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat-card p-8 bg-white border border-neutral-200 rounded-lg text-center hover:shadow-md transition-all duration-300">
+      <p className="text-neutral-600 text-sm font-semibold mb-3 uppercase tracking-wide">{label}</p>
+      <p className="text-4xl font-bold text-neutral-900">{value}</p>
+    </div>
+  );
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="text-center py-16 px-6 bg-neutral-50 rounded-lg border border-neutral-200">
+      <p className="text-xl font-bold text-neutral-900 mb-2">{title}</p>
+      <p className="text-neutral-600 text-sm">{description}</p>
+    </div>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      className="flex items-center gap-2 px-4 py-2.5 text-neutral-700 hover:text-neutral-900 hover:bg-neutral-100 font-semibold text-sm rounded-lg transition-all duration-200 mb-8"
+      onClick={onClick}
+    >
+      <Icons.ChevronLeft />
+      <span>Back</span>
+    </button>
+  );
+}
+
+function ApplicantsView({
+  projects,
+  wallet,
+  loadProjects,
+}: {
+  projects: Project[];
+  wallet: string;
   setError: (s: string) => void;
   loadProjects: () => void;
 }) {
-  const [tokenId, setTokenId] = useState("");
+  const [error, setError] = useState("");
+  const myProjects = projects.filter((p) => p.businessAddress === wallet && p.applicants.length > 0);
+
+  return (
+    <div className="p-8 max-w-4xl mx-auto">
+      {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>}
+      {myProjects.length === 0 ? (
+        <EmptyState
+          title="No applicants yet"
+          description="Your posted projects will appear here when freelancers apply"
+        />
+      ) : (
+        <div className="space-y-6">
+          {myProjects.map((p) => (
+            <div key={p.id} className="bg-white border border-neutral-200 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-neutral-900">{p.title}</h3>
+                <span className="px-3 py-1 bg-neutral-100 text-neutral-700 rounded-full text-sm font-semibold">
+                  {p.applicants.length} applicant{p.applicants.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {p.applicants.map((addr) => (
+                  <ApplicantItem
+                    key={addr}
+                    address={addr}
+                    projectId={p.id}
+                    isSelected={p.freelancerAddress === addr}
+                    setError={setError}
+                    loadProjects={loadProjects}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApplicantItem({
+  address,
+  projectId,
+  isSelected,
+  setError,
+  loadProjects,
+}: {
+  address: string;
+  projectId: string;
+  isSelected: boolean;
+  setError: (s: string) => void;
+  loadProjects: () => void;
+}) {
+  const [accepting, setAccepting] = useState(false);
+
+  const handleAccept = async () => {
+    setAccepting(true);
+    try {
+      await acceptFreelancer(projectId, address);
+      setError("Freelancer accepted successfully!");
+      loadProjects();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAccepting(false);
+    }
+  };
+
+  return (
+    <div className={`flex items-center justify-between p-5 rounded-lg border transition-all duration-200 ${
+      isSelected
+        ? "bg-green-50 border-green-200 shadow-sm"
+        : "bg-white border-neutral-200 hover:border-neutral-300 hover:shadow-md"
+    }`}>
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-neutral-700 text-sm">
+          {address.slice(0, 2).toUpperCase()}
+        </div>
+        <div>
+          <div className="font-semibold text-neutral-900 text-sm">
+            {address.slice(0, 12)}...{address.slice(-4)}
+          </div>
+          {isSelected && (
+            <div className="text-xs text-green-700 font-bold uppercase tracking-wide flex items-center gap-1 mt-1">
+              <Icons.CheckCircle />
+              Selected
+            </div>
+          )}
+        </div>
+      </div>
+      {!isSelected && (
+        <button
+          className="btn-accept px-5 py-2 text-sm font-semibold"
+          onClick={handleAccept}
+          disabled={accepting}
+        >
+          {accepting ? "..." : "Accept"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SearchView({
+  projects,
+  searchQuery,
+  setSearchQuery,
+  openProject,
+}: {
+  projects: Project[];
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+  openProject: (id: string) => void;
+}) {
+  const filtered = projects.filter(
+    (p) =>
+      p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.description.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <div className="p-10 max-w-7xl mx-auto">
+      <div className="mb-10">
+        <div className="flex items-center gap-3 bg-white border border-neutral-300 rounded-lg px-4 py-3 w-full max-w-md hover:border-neutral-400 transition-colors">
+          <Icons.Search />
+          <input
+            type="text"
+            placeholder="Search projects..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 bg-transparent outline-none text-neutral-900 placeholder-neutral-500"
+          />
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          title={searchQuery ? "No results" : "Search projects"}
+          description={searchQuery ? "Try different keywords or browse all" : "Enter keywords to search"}
+        />
+      ) : (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filtered.map((p) => (
+            <ProjectCard key={p.id} project={p} wallet="" onClick={() => openProject(p.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryView({
+  projects,
+  wallet,
+  role,
+  openProject,
+}: {
+  projects: Project[];
+  wallet: string;
+  role: string;
+  openProject: (id: string) => void;
+}) {
+  const relevant =
+    role === "hiring"
+      ? projects.filter((p) => p.businessAddress === wallet)
+      : projects.filter(
+          (p) => p.freelancerAddress === wallet || p.applicants.includes(wallet)
+        );
+
+  const active = relevant.filter((p) => !p.contractId);
+  const completed = relevant.filter((p) => p.contractId);
+
+  return (
+    <div className="p-10 max-w-7xl mx-auto">
+      <Section title="Active Projects" count={active.length}>
+        {active.length === 0 ? (
+          <EmptyState
+            title="No active projects"
+            description="Active projects will appear here"
+          />
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {active.map((p) => (
+              <ProjectCard
+                key={p.id}
+                project={p}
+                wallet={wallet}
+                onClick={() => openProject(p.id)}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section title="Completed Projects" count={completed.length}>
+        {completed.length === 0 ? (
+          <EmptyState
+            title="No completed projects"
+            description="Completed projects will appear here"
+          />
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {completed.map((p) => (
+              <ProjectCard
+                key={p.id}
+                project={p}
+                wallet={wallet}
+                onClick={() => openProject(p.id)}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function CreateProjectView({
+  wallet,
+  setView,
+  setError,
+  loadProjects,
+  openProject,
+}: {
+  wallet: string;
+  setView: (v: View) => void;
+  setError: (s: string) => void;
+  loadProjects: () => void;
+  openProject: (id: string) => void;
+}) {
+  const [tokenId, setTokenId] = useState(
+    "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [totalAmount, setTotalAmount] = useState("100");
+  const [totalAmount, setTotalAmount] = useState("100000");
   const [deadlineDays, setDeadlineDays] = useState("14");
+  const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
     if (!wallet) {
-      setError("Connect wallet first");
+      setError("Wallet not connected");
       return;
     }
+    if (!title.trim()) {
+      setError("Project title is required");
+      return;
+    }
+    if (!tokenId.trim()) {
+      setError("Token ID is required");
+      return;
+    }
+    if (!totalAmount.trim()) {
+      setError("Payment amount is required");
+      return;
+    }
+    if (!deadlineDays.trim()) {
+      setError("Deadline is required");
+      return;
+    }
+    
+    setSubmitting(true);
     setError("");
     try {
       const now = Math.floor(Date.now() / 1000);
@@ -326,129 +993,8 @@ function CreateForm({
         deliveryDeadlineTs: deliveryTs,
       });
       loadProjects();
-      onCreated(res.id);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  return (
-    <div className="app">
-      <header className="header">
-        <span className="title">Post Project</span>
-        <button className="btn secondary" onClick={onBack}>Back</button>
-      </header>
-      <div className="card">
-        <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "1rem" }}>
-          Create project first. After you accept a freelancer, deploy the escrow contract and add its ID.
-        </p>
-        <div className="form-group">
-          <label>Project Title</label>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Logo design" />
-        </div>
-        <div className="form-group">
-          <label>Description</label>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Scope of work" />
-        </div>
-        <div className="form-group">
-          <label>Token ID</label>
-          <input value={tokenId} onChange={(e) => setTokenId(e.target.value)} placeholder="C..." />
-        </div>
-        <div className="form-group">
-          <label>Total Payment (smallest unit)</label>
-          <input value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} placeholder="100" />
-        </div>
-        <div className="form-group">
-          <label>Delivery Deadline (days)</label>
-          <input value={deadlineDays} onChange={(e) => setDeadlineDays(e.target.value)} />
-        </div>
-        <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
-          <button className="btn" onClick={submit} disabled={!tokenId || !title}>
-            Create
-          </button>
-          <button className="btn secondary" onClick={onBack}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SetContractForm({ projectId, onSet, setError }: { projectId: string; onSet: () => Promise<void>; setError: (s: string) => void }) {
-  const [contractId, setContractId] = useState("");
-  const [deploying, setDeploying] = useState(false);
-
-  const handleSet = async () => {
-    setDeploying(true);
-    setError("");
-    try {
-      await setProjectContract(projectId, contractId.trim());
-      await onSet();
-      setError("Contract set! Advance can now be paid.");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setDeploying(false);
-    }
-  };
-
-  return (
-    <div className="card">
-      <h3>Step 2: Deploy & Set Contract</h3>
-      <p style={{ color: "#666", fontSize: "0.875rem", lineHeight: "1.5" }}>
-        You've accepted a freelancer. Now deploy the Soroban escrow contract:
-      </p>
-      <ol style={{ color: "#666", fontSize: "0.875rem", marginTop: "0.5rem" }}>
-        <li>Use stellar.io/docs or soroban-cli: <code style={{background: "#1a1a1a", padding: "2px 4px"}}>soroban contract build</code></li>
-        <li>Deploy with freelancer address: <code style={{background: "#1a1a1a", padding: "2px 4px"}}>soroban contract deploy --wasm target/wasm32-unknown-unknown/release/hello_world.wasm</code></li>
-        <li>Copy the contract ID (C...) and paste below</li>
-        <li>Call: <code style={{background: "#1a1a1a", padding: "2px 4px"}}>contract.init_project(business, freelancer, token, total, advance, deadline, verification_secs)</code></li>
-      </ol>
-      <div className="form-group" style={{ marginTop: "1rem" }}>
-        <label>Contract ID</label>
-        <input value={contractId} onChange={(e) => setContractId(e.target.value)} placeholder="C..." />
-      </div>
-      <button
-        className="btn"
-        onClick={handleSet}
-        disabled={!contractId.trim() || deploying}
-      >
-        {deploying ? "Setting..." : "Set Contract"}
-      </button>
-    </div>
-  );
-}
-
-function ProjectDetail({
-  project,
-  startInfo,
-  wallet,
-  error,
-  onBack,
-  setError,
-  loadProject,
-}: {
-  project: Project;
-  startInfo: StartResponse | null;
-  wallet: string | null;
-  error: string;
-  onBack: () => void;
-  setError: (s: string) => void;
-  loadProject: () => Promise<void>;
-}) {
-  const [deliverableFile, setDeliverableFile] = useState<File | null>(null);
-  const [hashResult, setHashResult] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const isHiring = wallet === project.businessAddress;
-  const isFreelancer = wallet === project.freelancerAddress;
-
-  const handleSubmitDelivery = async () => {
-    if (!deliverableFile || !isFreelancer) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      const res = await submitDelivery(project.id, deliverableFile);
-      setHashResult(res.deliverableHashHex);
-      setError(`✓ Deliverable hashed. Call contract.submit_delivery(freelancer, "${res.deliverableHashHex.slice(0, 32)}...") on ${res.contractId}`);
+      setError("");
+      openProject(res.id);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -456,132 +1002,395 @@ function ProjectDetail({
     }
   };
 
-  const getStatusDisplay = () => {
-    if (startInfo?.status === "completed") return "✓ Completed";
-    if (startInfo?.status === "ready") return "✓ Ready to Work";
-    if (startInfo?.status === "error") return "✗ Refunded or Error";
-    if (startInfo?.advanceAmount) return "⏳ Waiting for Payment";
-    return "⏳ Not Started";
+  return (
+    <div className="p-10 max-w-2xl mx-auto">
+      <BackButton onClick={() => setView("home")} />
+
+      <div className="bg-white border border-neutral-200 rounded-xl p-10 shadow-sm">
+        <h2 className="text-3xl font-bold text-neutral-900 mb-2">Create Project</h2>
+        <p className="text-neutral-600 mb-8">
+          Post details for your project and find the right freelancer.
+        </p>
+
+        <div className="space-y-7">
+          <div>
+            <label className="form-group-label">Project Title *</label>
+            <input
+              className="form-input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Website Development, Logo Design..."
+              type="text"
+            />
+          </div>
+
+          <div>
+            <label className="form-group-label">Description *</label>
+            <textarea
+              className="form-input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Scope, requirements, and deliverables..."
+              rows={5}
+            />
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-7">
+            <div>
+              <label className="form-group-label">Token ID *</label>
+              <input
+                className="form-input"
+                value={tokenId}
+                onChange={(e) => setTokenId(e.target.value)}
+                placeholder="e.g., C..."
+                type="text"
+              />
+            </div>
+            <div>
+              <label className="form-group-label">Payment (Stroops) *</label>
+              <input
+                className="form-input"
+                value={totalAmount}
+                onChange={(e) => setTotalAmount(e.target.value)}
+                type="number"
+                placeholder="100000"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="form-group-label">Deadline (days) *</label>
+            <input
+              className="form-input"
+              value={deadlineDays}
+              onChange={(e) => setDeadlineDays(e.target.value)}
+              type="number"
+              placeholder="14"
+            />
+          </div>
+
+          <div className="flex gap-4 mt-10 pt-4 border-t border-neutral-200">
+            <button
+              className="btn-primary flex-1 py-3 font-semibold disabled:opacity-60 disabled:hover:bg-neutral-900 disabled:hover:shadow-md"
+              onClick={submit}
+              disabled={submitting || !title.trim() || !tokenId.trim()}
+            >
+              {submitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="loading-spinner"></span>
+                  Creating...
+                </span>
+              ) : (
+                "Create Project"
+              )}
+            </button>
+            <button className="btn-secondary flex-1 py-3 font-semibold" onClick={() => setView("home")}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectDetailView({
+  project,
+  startInfo,
+  wallet,
+  setError,
+  refreshProject,
+  goBack,
+}: {
+  project: Project;
+  startInfo: StartResponse | null;
+  wallet: string;
+  role: string;
+  setError: (s: string) => void;
+  refreshProject: () => Promise<void>;
+  goBack: () => void;
+}) {
+  const isHiring = project.businessAddress === wallet;
+  const isFreelancer = project.freelancerAddress === wallet;
+  const [tab, setTab] = useState<"overview" | "actions">("overview");
+  const [applying, setApplying] = useState(false);
+  const canApply = !!wallet && !isHiring && !project.freelancerAddress;
+  const isApplied = project.applicants.includes(wallet);
+
+  const handleApply = async () => {
+    if (!wallet || applying || isApplied) return;
+    setApplying(true);
+    setError("");
+    try {
+      await applyToProject(project.id, wallet);
+      await refreshProject();
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to apply");
+    } finally {
+      setApplying(false);
+    }
   };
 
   return (
-    <div className="app">
-      <header className="header">
-        <span className="title">{project.title}</span>
-        <button className="btn secondary" onClick={onBack}>Back</button>
-      </header>
-      
-      {error && <div className="error-msg">{error}</div>}
-      
-      <div className="card">
-        <h3>{project.title}</h3>
-        <p style={{color: "#999", marginBottom: "0.75rem"}}>{project.description}</p>
-        
-        <div style={{ background: "#0a0a0a", border: "1px solid #222", padding: "0.75rem", marginBottom: "1rem", fontSize: "0.875rem" }}>
-          <div><strong>Total Payment:</strong> {project.totalAmount}</div>
-          <div style={{marginTop: "0.25rem"}}><strong>30% Advance:</strong> {project.advanceAmount}</div>
-          <div style={{marginTop: "0.25rem"}}><strong>Status:</strong> {getStatusDisplay()}</div>
-          <Countdown deadlineTs={project.deliveryDeadlineTs} label="Delivery Deadline" />
+    <div className="p-10 max-w-4xl mx-auto">
+      <BackButton onClick={goBack} />
+
+      <div className="bg-white border border-neutral-200 rounded-xl p-10 shadow-sm">
+        <div className="mb-6">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <h1 className="text-3xl font-bold text-neutral-900">{project.title}</h1>
+            <div className="flex gap-2">
+              {project.contractId && (
+                <span className="px-4 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
+                  Escrow Active
+                </span>
+              )}
+              {isHiring && (
+                <span className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold">
+                  Your Project
+                </span>
+              )}
+              {isFreelancer && (
+                <span className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg text-sm font-semibold">
+                  Accepted
+                </span>
+              )}
+            </div>
+          </div>
+          <p className="text-neutral-600 text-lg">{project.description}</p>
         </div>
 
-        {project.contractId && (
-          <div style={{ background: "#0a0a0a", border: "1px solid #222", padding: "0.75rem", marginBottom: "1rem", fontSize: "0.7rem" }}>
-            <strong>Contract:</strong> <span style={{fontFamily: "monospace"}}>{project.contractId}</span>
+        {/* Tabs */}
+        <div className="border-b border-neutral-200 mb-6">
+          <div className="flex gap-8">
+            <button
+              onClick={() => setTab("overview")}
+              className={`pb-4 font-semibold transition-colors ${
+                tab === "overview"
+                  ? "text-neutral-900 border-b-2 border-neutral-900"
+                  : "text-neutral-600 hover:text-neutral-900"
+              }`}
+            >
+              Overview
+            </button>
+            <button
+              onClick={() => setTab("actions")}
+              className={`pb-4 font-semibold transition-colors ${
+                tab === "actions"
+                  ? "text-neutral-900 border-b-2 border-neutral-900"
+                  : "text-neutral-600 hover:text-neutral-900"
+              }`}
+            >
+              Actions
+            </button>
+          </div>
+        </div>
+
+        {/* Overview Tab */}
+        {tab === "overview" && (
+          <div>
+            <div className="grid md:grid-cols-4 gap-6 mb-8">
+              <DetailItem label="Total Budget" value={`$${project.totalAmount}`} />
+              <DetailItem label="30% Advance" value={`$${project.advanceAmount}`} />
+              <DetailItem
+                label="Deadline"
+                value={
+                  <Countdown
+                    deadlineTs={project.deliveryDeadlineTs}
+                    label=""
+                  />
+                }
+              />
+              <DetailItem
+                label="Status"
+                value={
+                  startInfo?.status === "ready"
+                    ? "Ready for Work"
+                    : startInfo?.advanceAmount
+                    ? "Waiting for Payment"
+                    : "New"
+                }
+              />
+            </div>
+
+            {canApply && (
+              <div className="mb-8 p-6 rounded-lg border-2 border-neutral-200 bg-neutral-50">
+                {isApplied ? (
+                  <p className="text-neutral-700 font-semibold flex items-center gap-2">
+                    <Icons.CheckCircle />
+                    You have applied to this project. The client will choose a freelancer from the applicants.
+                  </p>
+                ) : (
+                  <div>
+                    <p className="text-neutral-700 font-semibold mb-4">Interested? Apply and the client will see your wallet address.</p>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={handleApply}
+                      disabled={applying}
+                    >
+                      {applying ? "Applying…" : "Apply to this project"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isHiring && (
+              <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-6">
+                <h3 className="text-lg font-bold text-neutral-900 mb-4">
+                  Applicants ({project.applicants.length})
+                </h3>
+                {project.applicants.length === 0 ? (
+                  <p className="text-neutral-600 text-sm">No applicants yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {project.applicants.map((addr) => (
+                      <div
+                        key={addr}
+                        className={`flex items-center justify-between p-3 rounded-lg ${
+                          project.freelancerAddress === addr
+                            ? "bg-green-50 border border-green-200"
+                            : "bg-white border border-neutral-200"
+                        }`}
+                      >
+                        <span className="text-neutral-900 font-medium">
+                          {addr.slice(0, 10)}...{addr.slice(-4)}
+                        </span>
+                        {project.freelancerAddress === addr && (
+                          <span className="text-green-700 font-semibold flex items-center gap-1">
+                            <Icons.CheckCircle />
+                            Selected
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Actions Tab */}
+        {tab === "actions" && (
+          <div>
+            <ActionsList
+              project={project}
+              wallet={wallet}
+              startInfo={startInfo}
+              refreshProject={refreshProject}
+            />
+            <div className="mt-6">
+              <button
+                className="btn-secondary px-6 py-2"
+                onClick={refreshProject}
+              >
+                Refresh Status
+              </button>
+            </div>
           </div>
         )}
       </div>
+    </div>
+  );
+}
 
-      {isHiring && project.applicants.length > 0 && (
-        <div className="card">
-          <h3>Step 1: Accept Freelancer</h3>
-          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Choose who will do the work:</p>
-          {project.applicants.map((addr) => (
-            <div key={addr} className="project-row">
-              <span className="chip" title={addr}>{addr.slice(0, 8)}...{addr.slice(-4)}</span>
-              <button
-                className="btn"
-                onClick={async () => {
-                  setError("");
-                  try {
-                    await acceptFreelancer(project.id, addr);
-                    await loadProject();
-                    setError("");
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
-                }}
-                disabled={!!project.freelancerAddress}
-              >
-                {project.freelancerAddress === addr ? "✓ Accepted" : "Accept"}
-              </button>
-            </div>
-          ))}
-        </div>
+function DetailItem({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="bg-neutral-50 rounded-lg p-5 border border-neutral-200 hover:border-neutral-300 transition-colors duration-200">
+      <p className="text-neutral-600 text-xs font-bold mb-3 uppercase tracking-wide">{label}</p>
+      <p className="text-neutral-900 font-bold text-xl">{value}</p>
+    </div>
+  );
+}
+
+function ActionsList({
+  project,
+  wallet,
+  startInfo,
+}: {
+  project: Project;
+  wallet: string;
+  startInfo: StartResponse | null;
+  refreshProject: () => Promise<void>;
+}) {
+  const isHiring = project.businessAddress === wallet;
+  const isFreelancer = project.freelancerAddress === wallet;
+
+  return (
+    <div className="space-y-4">
+      {isHiring && !project.freelancerAddress && (
+        <ActionCard
+          title="Step 1: Select Freelancer"
+          description="Choose a freelancer from applicants"
+          status="pending"
+        />
       )}
 
       {isHiring && project.freelancerAddress && !project.contractId && (
-        <SetContractForm projectId={project.id} onSet={loadProject} setError={setError} />
+        <ActionCard
+          title="Step 2: Deploy Contract"
+          description="Deploy the Soroban escrow contract"
+          status="pending"
+        />
       )}
 
       {isHiring && project.contractId && startInfo?.advanceAmount && (
-        <div className="card">
-          <h3>Step 3: Pay Advance (30%)</h3>
-          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Send ${project.advanceAmount} to the contract:</p>
-          <ol style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>
-            <li>In your wallet, "send" {project.advanceAmount} to {project.contractId}</li>
-            <li>Approve transaction on {project.tokenId}</li>
-            <li>Call <code style={{background: "#1a1a1a", padding: "2px 4px"}}>contract.deposit_advance(business)</code></li>
-            <li>Refresh this page</li>
-          </ol>
-          <button className="btn secondary" onClick={() => loadProject()}>Refresh Status</button>
-        </div>
+        <ActionCard
+          title="Step 3: Deposit Advance"
+          description={`Send ${project.advanceAmount} to contract`}
+          status="pending"
+        />
       )}
 
-      {isHiring && startInfo?.status === "ready" && project.contractId && (
-        <div className="card">
-          <h3>Step 4: Approve Delivery</h3>
-          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "0.75rem" }}>When freelancer delivers, call:</p>
-          <div style={{background: "#1a1a1a", padding: "0.75rem", fontFamily: "monospace", fontSize: "0.7rem", marginBottom: "0.75rem"}}>
-            contract.approve_delivery(business)
-          </div>
-          <p style={{ color: "#666", fontSize: "0.75rem" }}>OR wait 3 days for auto-release</p>
-        </div>
+      {isHiring && startInfo?.status === "ready" && (
+        <ActionCard
+          title="Ready to Work"
+          description="Freelancer can now start the assignment"
+          status="success"
+        />
       )}
 
-      {isFreelancer && project.freelancerAddress === wallet && !startInfo?.status && startInfo?.advanceAmount && (
-        <div className="card">
-          <h3>⏳ Waiting for Payment</h3>
-          <p>Hiring person must pay the 30% advance (${project.advanceAmount}) before you can submit work.</p>
-          <button className="btn secondary" onClick={() => loadProject()}>Check Status</button>
-        </div>
+      {isFreelancer && !startInfo?.status && startInfo?.advanceAmount && (
+        <ActionCard
+          title="Waiting for Payment"
+          description={`Manager must pay ${project.advanceAmount} to start`}
+          status="info"
+        />
       )}
 
       {isFreelancer && startInfo?.status === "ready" && (
-        <div className="card">
-          <h3>Ready to Work!</h3>
-          <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "1rem" }}>Advance is locked. Submit your deliverable:</p>
-          <div className="form-group">
-            <label>Deliverable File</label>
-            <input type="file" onChange={(e) => setDeliverableFile(e.target.files?.[0] ?? null)} />
-          </div>
-          <button className="btn" onClick={handleSubmitDelivery} disabled={!deliverableFile || submitting} style={{ marginBottom: "0.5rem" }}>
-            {submitting ? "Hashing..." : "Submit Deliverable"}
-          </button>
-          {hashResult && (
-            <div style={{ marginTop: "0.75rem", background: "#0a0a0a", border: "1px solid #222", padding: "0.75rem", fontSize: "0.7rem" }}>
-              <p style={{margin: "0 0 0.25rem 0"}}>Hash: <span style={{fontFamily: "monospace"}}>{hashResult}</span></p>
-              <p style={{margin: "0", color: "#666"}}>Copy this to submit_delivery call on the contract</p>
-            </div>
-          )}
-        </div>
+        <ActionCard
+          title="Ready to Work"
+          description="Submit deliverables when complete"
+          status="success"
+        />
       )}
+    </div>
+  );
+}
 
-      {isFreelancer && startInfo?.status === "completed" && (
-        <div className="card">
-          <h3>✓ Payment Complete</h3>
-          <p>You've been paid. Project is closed.</p>
-        </div>
-      )}
+function ActionCard({
+  title,
+  description,
+  status,
+}: {
+  title: string;
+  description: string;
+  status: "pending" | "success" | "info";
+}) {
+  const styles = {
+    pending: "bg-yellow-50 border-yellow-200 text-yellow-900",
+    success: "bg-green-50 border-green-200 text-green-900",
+    info: "bg-blue-50 border-blue-200 text-blue-900",
+  }[status];
+
+  return (
+    <div className={`border rounded-lg p-6 ${styles} hover:shadow-md transition-shadow duration-300`}>
+      <h4 className="font-bold text-lg mb-2">{title}</h4>
+      <p className="text-sm">{description}</p>
     </div>
   );
 }

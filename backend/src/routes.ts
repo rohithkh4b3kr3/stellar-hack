@@ -12,6 +12,11 @@ import type { CreateProjectBody, SetContractBody, ApplyBody, SubmitBody } from "
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = Router();
 
+function projectId(req: Request): string {
+  const id = req.params.id;
+  return Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
+}
+
 // ---------- POST /project/create ----------
 router.post("/project/create", (req: Request, res: Response) => {
   try {
@@ -60,7 +65,7 @@ router.get("/projects", (_req: Request, res: Response) => {
 
 // ---------- GET /project/:id ----------
 router.get("/project/:id", (req: Request, res: Response) => {
-  const project = getProject(req.params.id);
+  const project = getProject(projectId(req));
   if (!project) return res.status(404).json({ error: "Project not found" });
   return res.json(project);
 });
@@ -68,7 +73,7 @@ router.get("/project/:id", (req: Request, res: Response) => {
 // ---------- POST /project/:id/apply ----------
 router.post("/project/:id/apply", (req: Request, res: Response) => {
   const body = req.body as ApplyBody;
-  const project = getProject(req.params.id);
+  const project = getProject(projectId(req));
   if (!project) return res.status(404).json({ error: "Project not found" });
   const addr = body.freelancerAddress ?? req.body?.freelancerAddress;
   if (!addr) return res.status(400).json({ error: "freelancerAddress required" });
@@ -81,7 +86,7 @@ router.post("/project/:id/apply", (req: Request, res: Response) => {
 // ---------- POST /project/:id/accept ----------
 router.post("/project/:id/accept", (req: Request, res: Response) => {
   const body = req.body as ApplyBody;
-  const project = getProject(req.params.id);
+  const project = getProject(projectId(req));
   if (!project) return res.status(404).json({ error: "Project not found" });
   const addr = body.freelancerAddress ?? req.body?.freelancerAddress;
   if (!addr) return res.status(400).json({ error: "freelancerAddress required" });
@@ -94,7 +99,7 @@ router.post("/project/:id/accept", (req: Request, res: Response) => {
 // ---------- POST /project/:id/set-contract ----------
 router.post("/project/:id/set-contract", (req: Request, res: Response) => {
   const body = req.body as SetContractBody;
-  const project = getProject(req.params.id);
+  const project = getProject(projectId(req));
   if (!project) return res.status(404).json({ error: "Project not found" });
   if (!body.contractId) return res.status(400).json({ error: "contractId required" });
   project.contractId = body.contractId;
@@ -105,7 +110,7 @@ router.post("/project/:id/set-contract", (req: Request, res: Response) => {
 // ---------- GET /project/:id/start (x402) ----------
 router.get("/project/:id/start", async (req: Request, res: Response) => {
   try {
-    const project = getProject(req.params.id);
+    const project = getProject(projectId(req));
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (!project.freelancerAddress) return res.status(400).json({ error: "No freelancer accepted yet" });
     if (!project.contractId) return res.status(400).json({ error: "Contract not deployed yet. Deploy and set contract ID after accepting freelancer." });
@@ -120,12 +125,13 @@ router.get("/project/:id/start", async (req: Request, res: Response) => {
     if (state === 1 || state === 2) {
       return res.status(200).json({
         status: "ready",
-        message: "Advance deposited; work can start.",
+        message: state === 1 ? "Advance deposited; work can start." : "Delivery submitted; deposit remaining & approve.",
         contractId: project.contractId,
         projectId: project.id,
+        contractState: state,
       });
     }
-    if (state === 3) return res.status(200).json({ status: "completed", contractId: project.contractId, projectId: project.id });
+    if (state === 3) return res.status(200).json({ status: "completed", contractId: project.contractId, projectId: project.id, contractState: 3 });
     if (state === 4) return res.status(400).json({ error: "Project refunded" });
 
     res.status(402).set({
@@ -154,7 +160,7 @@ router.post(
   upload.single("deliverable"),
   (req: Request, res: Response) => {
     try {
-      const project = getProject(req.params.id);
+      const project = getProject(projectId(req));
       if (!project) return res.status(404).json({ error: "Project not found" });
       if (!project.contractId) return res.status(400).json({ error: "Contract not deployed" });
       const body = (req.body || {}) as SubmitBody;
@@ -186,7 +192,7 @@ router.post(
 
 // ---------- POST /project/:id/approve ----------
 router.post("/project/:id/approve", (req: Request, res: Response) => {
-  const project = getProject(req.params.id);
+  const project = getProject(projectId(req));
   if (!project) return res.status(404).json({ error: "Project not found" });
   return res.json({
     message: "Call contract.approve_delivery(business) from hiring person wallet.",
@@ -197,7 +203,7 @@ router.post("/project/:id/approve", (req: Request, res: Response) => {
 
 // ---------- POST /project/:id/refund ----------
 router.post("/project/:id/refund", (req: Request, res: Response) => {
-  const project = getProject(req.params.id);
+  const project = getProject(projectId(req));
   if (!project) return res.status(404).json({ error: "Project not found" });
   return res.json({
     message: "Call contract.refund_if_deadline_missed() after delivery deadline passed.",

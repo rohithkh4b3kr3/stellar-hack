@@ -26,6 +26,12 @@ impl Contract {
         verification_window_secs: u64,
     ) {
         business.require_auth();
+        if env.storage().instance().has(&DataKey::Project) {
+            let existing: ProjectData = env.storage().instance().get(&DataKey::Project).unwrap();
+            if existing.state != ProjectState::Created {
+                panic!("project already initialized");
+            }
+        }
         if advance_amount <= 0 || total_amount <= 0 || advance_amount > total_amount {
             panic!("invalid amounts");
         }
@@ -63,7 +69,7 @@ impl Contract {
         }
         let contract_id = env.current_contract_address();
         let token_client = token::Client::new(&env, &project.token);
-        token_client.transfer_from(&contract_id, &business, &contract_id, &project.advance_amount);
+        token_client.transfer_from(&business, &contract_id, &project.advance_amount);
         project.state = ProjectState::AdvanceDeposited;
         env.storage().instance().set(&DataKey::Project, &project);
     }
@@ -88,7 +94,7 @@ impl Contract {
         }
         let contract_id = env.current_contract_address();
         let token_client = token::Client::new(&env, &project.token);
-        token_client.transfer_from(&contract_id, &business, &contract_id, &remaining);
+        token_client.transfer_from(&business, &contract_id, &remaining);
         env.storage().instance().set(&DataKey::Project, &project);
     }
 

@@ -1,30 +1,32 @@
 /**
- * Soroban contract invocation via Freighter.
- * Builds transaction XDR and submits after user signs.
+ * Soroban contract invocation via Freighter (bundled npm package).
  */
+import { signTransaction as freighterSignTransaction } from "@stellar/freighter-api";
 import {
+  Account,
   Contract,
   TransactionBuilder,
-  SorobanRpc,
-  Network,
   Keypair,
   nativeToScVal,
   Address as StellarAddress,
+  Networks,
 } from "@stellar/stellar-sdk";
+import { Server } from "@stellar/stellar-sdk/rpc";
 
 const rpcUrl = import.meta.env.VITE_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
-const networkPassphrase = import.meta.env.VITE_NETWORK_PASSPHRASE || Network.TESTNET;
+const networkPassphrase = import.meta.env.VITE_NETWORK_PASSPHRASE || Networks.TESTNET;
 
-let server: SorobanRpc.Server | null = null;
-function getServer(): SorobanRpc.Server {
-  if (!server) server = new SorobanRpc.Server(rpcUrl);
+let server: Server | null = null;
+function getServer(): Server {
+  if (!server) server = new Server(rpcUrl);
   return server;
 }
 
 /** Submit signed XDR to network. */
 export async function submitTransaction(signedXdr: string): Promise<string> {
   const s = getServer();
-  const result = await s.sendTransaction(signedXdr);
+  const tx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+  const result = await s.sendTransaction(tx);
   if (result.errorResult) throw new Error(String(result.errorResult));
   if (result.status === "ERROR") throw new Error(result.status);
   return result.hash ?? "";
@@ -39,19 +41,19 @@ export async function invokeContract(
 ): Promise<string> {
   const contract = new Contract(contractId);
   const server = getServer();
-  const source = Keypair.fromPublicKey(sourcePublicKey);
-  
+  const sourceKp = Keypair.fromPublicKey(sourcePublicKey);
+  const sourceAccount = new Account(sourceKp.publicKey(), "0");
   // Convert args to ScVal format
   const convertedArgs = args.map((arg) => {
-    if (typeof arg === "string" && arg.startsWith("G")) {
-      // Treat as Stellar address
-      return StellarAddress.fromString(arg).toXDRObject();
+    if (typeof arg === "string" && (arg.startsWith("G") || arg.startsWith("C"))) {
+      // Treat as Stellar address or contract ID
+      return nativeToScVal(StellarAddress.fromString(arg));
     }
     return nativeToScVal(arg);
   });
   
   const op = contract.call(method, ...convertedArgs);
-  let tx = new TransactionBuilder(source.publicKey(), {
+  let tx = new TransactionBuilder(sourceAccount, {
     fee: "10000",
     networkPassphrase,
   })
@@ -60,9 +62,9 @@ export async function invokeContract(
     .build();
   tx = await server.prepareTransaction(tx);
   const xdr = tx.toXDR();
-  const w = (window as any).freighter;
-  if (!w?.signTransaction) throw new Error("Freighter not available");
-  const signed = await w.signTransaction(xdr, networkPassphrase);
+  const result = await freighterSignTransaction(xdr, { networkPassphrase });
+  if ("error" in result && result.error) throw new Error(result.error);
+  const signed = (result as { signedTxXdr: string }).signedTxXdr;
   return submitTransaction(signed);
 }
 
@@ -113,6 +115,13 @@ export async function depositRemaining(
   return invokeContract(sourcePublicKey, contractId, "deposit_remaining", [businessAddress]);
 }
 
+/** Hex string to Uint8Array (browser-safe, no Buffer) */
+function hexToBytes(hex: string): Uint8Array {
+  const match = hex.match(/.{1,2}/g);
+  if (!match || match.length !== 32) throw new Error("Hash must be 64 hex chars (32 bytes)");
+  return new Uint8Array(match.map((b) => parseInt(b, 16)));
+}
+
 /** Freelancer submits delivery hash */
 export async function submitDeliveryHash(
   sourcePublicKey: string,
@@ -120,11 +129,10 @@ export async function submitDeliveryHash(
   freelancerAddress: string,
   deliveryHashHex: string
 ): Promise<string> {
-  // Convert 64-char hex string to BytesN<32>
-  const hashBuffer = Buffer.from(deliveryHashHex, "hex");
+  const hashBytes = hexToBytes(deliveryHashHex);
   return invokeContract(sourcePublicKey, contractId, "submit_delivery", [
     freelancerAddress,
-    hashBuffer,
+    hashBytes,
   ]);
 }
 
