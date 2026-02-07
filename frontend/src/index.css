@@ -3,13 +3,14 @@
 }
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #0f0f14;
-  color: #e4e4e7;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  background: #000;
+  color: #fff;
   min-height: 100vh;
 }
 a {
-  color: #7c9eff;
+  color: #fff;
+  text-decoration: underline;
 }
 button {
   cursor: pointer;
@@ -20,9 +21,9 @@ input, textarea {
 }
 
 .app {
-  max-width: 900px;
+  max-width: 720px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 2rem;
 }
 .header {
   display: flex;
@@ -30,106 +31,159 @@ input, textarea {
   justify-content: space-between;
   margin-bottom: 2rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid #27272a;
+  border-bottom: 1px solid #333;
 }
 .title {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 600;
 }
 .wallet {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: #999;
 }
 .wallet span {
-  font-size: 0.875rem;
-  color: #a1a1aa;
-  max-width: 180px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.btn {
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  border: none;
-  background: #3b82f6;
-  color: white;
-}
-.btn:hover {
-  background: #2563eb;
-}
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.btn.secondary {
-  background: #27272a;
-  color: #e4e4e7;
-}
-.btn.secondary:hover {
-  background: #3f3f46;
-}
-.btn.danger {
-  background: #b91c1c;
-}
-.btn.danger:hover {
-  background: #991b1b;
+  display: inline-block;
+  vertical-align: middle;
 }
 
+/* Landing */
+.landing {
+  text-align: center;
+  padding: 4rem 0;
+}
+.landing h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  letter-spacing: -0.02em;
+}
+.landing p {
+  color: #999;
+  margin: 0 0 3rem 0;
+}
+.role-btns {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.role-btn {
+  padding: 1rem 2rem;
+  border: 2px solid #fff;
+  background: transparent;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 500;
+  min-width: 200px;
+}
+.role-btn:hover {
+  background: #fff;
+  color: #000;
+}
+
+/* Cards */
 .card {
-  background: #18181b;
-  border: 1px solid #27272a;
-  border-radius: 12px;
-  padding: 1.25rem;
+  background: #0a0a0a;
+  border: 1px solid #222;
+  padding: 1.5rem;
   margin-bottom: 1rem;
 }
 .card h3 {
   margin: 0 0 0.75rem 0;
   font-size: 1rem;
+  font-weight: 600;
 }
 .form-group {
   margin-bottom: 1rem;
 }
 .form-group label {
   display: block;
-  font-size: 0.875rem;
-  color: #a1a1aa;
+  font-size: 0.75rem;
+  color: #666;
   margin-bottom: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
-.form-group input {
+.form-group input,
+.form-group textarea {
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #3f3f46;
-  border-radius: 8px;
-  background: #27272a;
-  color: #e4e4e7;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #333;
+  background: #000;
+  color: #fff;
 }
+.form-group textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.btn {
+  padding: 0.6rem 1.2rem;
+  border: 1px solid #fff;
+  background: #fff;
+  color: #000;
+  font-weight: 500;
+}
+.btn:hover {
+  background: #e5e5e5;
+  border-color: #e5e5e5;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn.secondary {
+  background: transparent;
+  color: #fff;
+  border-color: #555;
+}
+.btn.secondary:hover {
+  background: #1a1a1a;
+  border-color: #666;
+}
+
 .timer {
-  font-size: 0.875rem;
-  color: #fbbf24;
+  font-size: 0.75rem;
+  color: #888;
 }
 .timer.past {
-  color: #f87171;
+  color: #666;
 }
-.milestone-row {
+
+.project-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid #27272a;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #1a1a1a;
 }
-.milestone-row:last-child {
+.project-row:last-child {
   border-bottom: none;
 }
-.status {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 6px;
-  text-transform: uppercase;
+.project-row strong {
+  font-weight: 600;
 }
-.status.pending { background: #27272a; color: #a1a1aa; }
-.status.submitted { background: #1e3a5f; color: #7c9eff; }
-.status.approved { background: #14532d; color: #86efac; }
-.status.disputed { background: #7f1d1d; color: #fca5a5; }
+
+.error-msg {
+  background: #1a0a0a;
+  border: 1px solid #330;
+  color: #f66;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+}
+
+.chip {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

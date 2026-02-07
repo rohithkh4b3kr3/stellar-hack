@@ -2,33 +2,36 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export interface Project {
   id: string;
-  contractId: string;
+  contractId?: string;
   businessAddress: string;
-  freelancerAddress: string;
+  freelancerAddress?: string;
   tokenId: string;
+  title: string;
+  description: string;
   totalAmount: string;
   advanceAmount: string;
-  milestoneAmounts: string[];
-  milestoneDeadlinesTs: number[];
-  finalDeadlineTs: number;
+  deliveryDeadlineTs: number;
   verificationWindowSecs: number;
+  applicants: string[];
   createdAt: number;
+}
+
+export async function listProjects(): Promise<Project[]> {
+  const r = await fetch(`${API}/projects`);
+  if (!r.ok) throw new Error("Failed to fetch projects");
+  return r.json();
 }
 
 export async function createProject(body: {
   contractId: string;
   businessAddress: string;
-  freelancerAddress: string;
   tokenId: string;
+  title: string;
+  description: string;
   totalAmount: string;
-  advanceAmount: string;
-  milestoneAmounts: string[];
-  milestoneDeadlinesTs: number[];
-  finalDeadlineTs: number;
-  verificationWindowSecs: number;
-  signature?: string;
-  publicKey?: string;
-}): Promise<{ projectId: string; contractId: string } & Project> {
+  deliveryDeadlineTs: number;
+  verificationWindowSecs?: number;
+}): Promise<Project> {
   const r = await fetch(`${API}/project/create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -44,6 +47,32 @@ export async function createProject(body: {
 export async function getProject(id: string): Promise<Project> {
   const r = await fetch(`${API}/project/${id}`);
   if (!r.ok) throw new Error("Project not found");
+  return r.json();
+}
+
+export async function applyToProject(projectId: string, freelancerAddress: string): Promise<Project> {
+  const r = await fetch(`${API}/project/${projectId}/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ freelancerAddress }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || r.statusText);
+  }
+  return r.json();
+}
+
+export async function acceptFreelancer(projectId: string, freelancerAddress: string): Promise<Project> {
+  const r = await fetch(`${API}/project/${projectId}/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ freelancerAddress }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || r.statusText);
+  }
   return r.json();
 }
 
@@ -65,11 +94,11 @@ export async function projectStart(id: string): Promise<StartResponse> {
   return data;
 }
 
-export async function milestoneSubmit(projectId: string, milestoneIndex: number, deliverableHashHex: string): Promise<{ deliverableHashHex: string }> {
-  const r = await fetch(`${API}/milestone/submit`, {
+export async function setProjectContract(projectId: string, contractId: string): Promise<Project> {
+  const r = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/project/${projectId}/set-contract`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, milestoneIndex, deliverableHashHex }),
+    body: JSON.stringify({ contractId }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -78,15 +107,10 @@ export async function milestoneSubmit(projectId: string, milestoneIndex: number,
   return r.json();
 }
 
-export async function milestoneSubmitFile(projectId: string, milestoneIndex: number, file: File): Promise<{ deliverableHashHex: string }> {
+export async function submitDelivery(projectId: string, file: File): Promise<{ deliverableHashHex: string; contractId: string }> {
   const form = new FormData();
-  form.set("projectId", projectId);
-  form.set("milestoneIndex", String(milestoneIndex));
   form.set("deliverable", file);
-  const r = await fetch(`${API}/milestone/submit`, {
-    method: "POST",
-    body: form,
-  });
+  const r = await fetch(`${API}/project/${projectId}/submit`, { method: "POST", body: form });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     throw new Error(e.error || r.statusText);

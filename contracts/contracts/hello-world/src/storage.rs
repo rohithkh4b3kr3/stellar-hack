@@ -1,40 +1,21 @@
-//! Escrow contract storage keys and types.
-//! All project state is stored in instance storage; only the contract holds funds.
+//! Escrow contract storage. Single delivery flow: 30% advance, full payment on approval.
+//! Contract is sole escrow holder; no admin.
 
 use soroban_sdk::contracttype;
 
 /// Project lifecycle state.
 #[derive(Clone, Debug, Eq, PartialEq, contracttype)]
 pub enum ProjectState {
-    /// Created, waiting for advance deposit.
+    /// Created; waiting for advance deposit.
     Created,
-    /// Advance deposited; freelancer can submit milestones.
+    /// Advance deposited; freelancer can submit delivery.
     AdvanceDeposited,
-    /// All milestones and final delivery done; can finalize.
+    /// Delivery submitted; approval window active.
+    DeliverySubmitted,
+    /// Completed; full payment released to freelancer.
     Completed,
-    /// Refunded to business (deadline missed or dispute).
+    /// Refunded to business (deadline missed).
     Refunded,
-}
-
-/// Single milestone: amount, deadline (unix timestamp), status.
-#[derive(Clone, Debug, Eq, PartialEq, contracttype)]
-pub enum MilestoneStatus {
-    Pending,
-    Submitted,   // hash submitted, waiting approval or timeout
-    Approved,    // funds released
-    Disputed,    // funds frozen
-}
-
-#[derive(Clone, Debug, contracttype)]
-pub struct Milestone {
-    pub amount: i128,
-    /// Unix timestamp by which freelancer must submit.
-    pub deadline_ts: u64,
-    pub status: MilestoneStatus,
-    /// Deliverable hash (set when submitted).
-    pub deliverable_hash: Option<soroban_sdk::BytesN<32>>,
-    /// Approval window ends at this timestamp (submission_ts + window).
-    pub approval_deadline_ts: Option<u64>,
 }
 
 #[derive(Clone, contracttype)]
@@ -43,20 +24,19 @@ pub struct ProjectData {
     pub freelancer: soroban_sdk::Address,
     pub token: soroban_sdk::Address,
     pub total_amount: i128,
+    /// Fixed 30% advance (locked first).
     pub advance_amount: i128,
-    /// Final delivery deadline (unix timestamp).
-    pub final_deadline_ts: u64,
-    /// Verification window in seconds (e.g. 7 days).
+    /// Unix timestamp: freelancer must deliver by this time.
+    pub delivery_deadline: u64,
+    /// Seconds after submission before auto-release (e.g. 3 days = 259200).
     pub verification_window_secs: u64,
     pub state: ProjectState,
-    pub milestones: soroban_sdk::Vec<Milestone>,
-    /// Set when freelancer submits final delivery.
-    pub final_delivery_hash: Option<soroban_sdk::BytesN<32>>,
-    /// Approval window end for final delivery.
-    pub final_approval_deadline_ts: Option<u64>,
+    /// Set when freelancer submits delivery hash.
+    pub delivery_hash: Option<soroban_sdk::BytesN<32>>,
+    /// Approval window ends at this timestamp.
+    pub approval_deadline_ts: Option<u64>,
 }
 
-/// Instance storage key for the single project (one project per contract instance).
 #[derive(Clone, contracttype)]
 pub enum DataKey {
     Project,

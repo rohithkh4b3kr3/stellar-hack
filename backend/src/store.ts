@@ -1,6 +1,6 @@
 /**
  * In-memory project store. Replace with DB in production.
- * Backend never holds funds; this is metadata only.
+ * Backend never holds funds; metadata only.
  */
 import type { ProjectRecord } from "./types.js";
 

@@ -1,60 +1,32 @@
 /**
- * REST API: project create, start (x402), milestone submit/approve, refund.
- * Backend never holds funds; all money is in the Soroban contract.
+ * REST API: Trustless Freelance Escrow
+ * Backend enforces x402, hashes deliverables, never holds funds.
  */
 import { Router, Request, Response } from "express";
 import multer from "multer";
-import { saveProject, getProject } from "./store.js";
-import { hashDeliverable, hashToHex, hexToBuffer, randomId, verifySignature } from "./crypto.js";
+import { saveProject, getProject, listProjects } from "./store.js";
+import { hashDeliverable, hashToHex, randomId, verifySignature } from "./crypto.js";
 import { getProjectState } from "./soroban.js";
-import type { CreateProjectBody, MilestoneSubmitBody, MilestoneApproveBody, RefundBody } from "./types.js";
+import type { CreateProjectBody, SetContractBody, ApplyBody, SubmitBody } from "./types.js";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = Router();
 
 // ---------- POST /project/create ----------
-// Register a new project (contract already deployed and inited by client).
 router.post("/project/create", (req: Request, res: Response) => {
   try {
     const body = req.body as CreateProjectBody;
-    const {
-      contractId,
-      businessAddress,
-      freelancerAddress,
-      tokenId,
-      totalAmount,
-      advanceAmount,
-      milestoneAmounts,
-      milestoneDeadlinesTs,
-      finalDeadlineTs,
-      verificationWindowSecs,
-      signature,
-      publicKey,
-    } = body;
+    const { businessAddress, tokenId, title, description, totalAmount, deliveryDeadlineTs, verificationWindowSecs, signature, publicKey } = body;
 
-    if (
-      !contractId ||
-      !businessAddress ||
-      !freelancerAddress ||
-      !tokenId ||
-      totalAmount == null ||
-      advanceAmount == null ||
-      !Array.isArray(milestoneAmounts) ||
-      !Array.isArray(milestoneDeadlinesTs) ||
-      finalDeadlineTs == null ||
-      verificationWindowSecs == null
-    ) {
+    if (!businessAddress || !tokenId || !title || totalAmount == null || deliveryDeadlineTs == null) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    const total = Number(totalAmount);
+    const advance = Math.floor(total * 0.3);
+
     if (signature && publicKey) {
-      const message = JSON.stringify({
-        contractId,
-        businessAddress,
-        freelancerAddress,
-        totalAmount,
-        advanceAmount,
-      });
+      const message = JSON.stringify({ businessAddress, tokenId, totalAmount });
       if (!verifySignature(message, signature, publicKey)) {
         return res.status(401).json({ error: "Invalid signature" });
       }
@@ -63,16 +35,15 @@ router.post("/project/create", (req: Request, res: Response) => {
     const id = randomId();
     const project = {
       id,
-      contractId,
       businessAddress,
-      freelancerAddress,
       tokenId,
+      title,
+      description: description ?? "",
       totalAmount: String(totalAmount),
-      advanceAmount: String(advanceAmount),
-      milestoneAmounts: milestoneAmounts.map(String),
-      milestoneDeadlinesTs,
-      finalDeadlineTs,
-      verificationWindowSecs,
+      advanceAmount: String(advance),
+      deliveryDeadlineTs,
+      verificationWindowSecs: verificationWindowSecs ?? 259200, // 3 days
+      applicants: [] as string[],
       createdAt: Date.now(),
     };
     saveProject(project);
@@ -82,21 +53,71 @@ router.post("/project/create", (req: Request, res: Response) => {
   }
 });
 
+// ---------- GET /projects ----------
+router.get("/projects", (_req: Request, res: Response) => {
+  return res.json(listProjects());
+});
+
+// ---------- GET /project/:id ----------
+router.get("/project/:id", (req: Request, res: Response) => {
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  return res.json(project);
+});
+
+// ---------- POST /project/:id/apply ----------
+router.post("/project/:id/apply", (req: Request, res: Response) => {
+  const body = req.body as ApplyBody;
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  const addr = body.freelancerAddress ?? req.body?.freelancerAddress;
+  if (!addr) return res.status(400).json({ error: "freelancerAddress required" });
+  if (project.applicants.includes(addr)) return res.status(200).json(project);
+  project.applicants.push(addr);
+  saveProject(project);
+  return res.status(200).json(project);
+});
+
+// ---------- POST /project/:id/accept ----------
+router.post("/project/:id/accept", (req: Request, res: Response) => {
+  const body = req.body as ApplyBody;
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  const addr = body.freelancerAddress ?? req.body?.freelancerAddress;
+  if (!addr) return res.status(400).json({ error: "freelancerAddress required" });
+  if (!project.applicants.includes(addr)) return res.status(400).json({ error: "Freelancer has not applied" });
+  project.freelancerAddress = addr;
+  saveProject(project);
+  return res.json(project);
+});
+
+// ---------- POST /project/:id/set-contract ----------
+router.post("/project/:id/set-contract", (req: Request, res: Response) => {
+  const body = req.body as SetContractBody;
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!body.contractId) return res.status(400).json({ error: "contractId required" });
+  project.contractId = body.contractId;
+  saveProject(project);
+  return res.json(project);
+});
+
 // ---------- GET /project/:id/start (x402) ----------
-// Freelancer requests to start; backend responds 402 until advance is in contract.
 router.get("/project/:id/start", async (req: Request, res: Response) => {
   try {
     const project = getProject(req.params.id);
     if (!project) return res.status(404).json({ error: "Project not found" });
+    if (!project.freelancerAddress) return res.status(400).json({ error: "No freelancer accepted yet" });
+    if (!project.contractId) return res.status(400).json({ error: "Contract not deployed yet. Deploy and set contract ID after accepting freelancer." });
 
     let state: number;
     try {
       state = await getProjectState(project.contractId);
     } catch {
-      state = 0; // assume Created if we can't read
+      state = 0;
     }
-    // 0=Created, 1=AdvanceDeposited, 2=Completed, 3=Refunded
-    if (state === 1) {
+    // 0=Created, 1=AdvanceDeposited, 2=DeliverySubmitted, 3=Completed, 4=Refunded
+    if (state === 1 || state === 2) {
       return res.status(200).json({
         status: "ready",
         message: "Advance deposited; work can start.",
@@ -104,14 +125,9 @@ router.get("/project/:id/start", async (req: Request, res: Response) => {
         projectId: project.id,
       });
     }
-    if (state === 2) {
-      return res.status(200).json({ status: "completed", contractId: project.contractId, projectId: project.id });
-    }
-    if (state === 3) {
-      return res.status(400).json({ error: "Project refunded" });
-    }
+    if (state === 3) return res.status(200).json({ status: "completed", contractId: project.contractId, projectId: project.id });
+    if (state === 4) return res.status(400).json({ error: "Project refunded" });
 
-    // state === 0: advance not yet deposited -> 402 Payment Required
     res.status(402).set({
       "Content-Type": "application/json",
       "X-Payment-Required": "true",
@@ -121,7 +137,7 @@ router.get("/project/:id/start", async (req: Request, res: Response) => {
     });
     return res.json({
       error: "Payment Required",
-      message: "Business must deposit the advance to the escrow contract before work can start.",
+      message: "Hiring person must deposit 30% advance to the escrow contract.",
       advanceAmount: project.advanceAmount,
       asset: project.tokenId,
       contractAddress: project.contractId,
@@ -132,29 +148,17 @@ router.get("/project/:id/start", async (req: Request, res: Response) => {
   }
 });
 
-// ---------- GET /project/:id ----------
-router.get("/project/:id", (req: Request, res: Response) => {
-  const project = getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: "Project not found" });
-  return res.json(project);
-});
-
-// ---------- POST /milestone/submit ----------
-// Accept deliverable (file or hash), return hash for client to submit on-chain.
+// ---------- POST /project/:id/submit ----------
 router.post(
-  "/milestone/submit",
+  "/project/:id/submit",
   upload.single("deliverable"),
   (req: Request, res: Response) => {
     try {
-      const body = (req.body || {}) as MilestoneSubmitBody;
-      const projectId = body.projectId ?? req.body?.projectId;
-      const milestoneIndex = Number(body.milestoneIndex ?? req.body?.milestoneIndex ?? 0);
-      const deliverableHashHex = body.deliverableHashHex ?? req.body?.deliverableHashHex;
-
-      if (!projectId) return res.status(400).json({ error: "projectId required" });
-
-      const project = getProject(projectId);
+      const project = getProject(req.params.id);
       if (!project) return res.status(404).json({ error: "Project not found" });
+      if (!project.contractId) return res.status(400).json({ error: "Contract not deployed" });
+      const body = (req.body || {}) as SubmitBody;
+      const deliverableHashHex = body.deliverableHashHex ?? req.body?.deliverableHashHex;
 
       let hashHex: string;
       if (deliverableHashHex && /^[0-9a-fA-F]{64}$/.test(deliverableHashHex)) {
@@ -163,17 +167,16 @@ router.post(
         const file = req.file;
         const buf = file?.buffer ?? (body.deliverableBase64 ? Buffer.from(body.deliverableBase64, "base64") : null);
         if (!buf || buf.length === 0) {
-          return res.status(400).json({ error: "Provide deliverable (file upload or deliverableBase64 or deliverableHashHex)" });
+          return res.status(400).json({ error: "Provide deliverable (file upload, deliverableBase64, or deliverableHashHex)" });
         }
-        const hash = hashDeliverable(buf);
-        hashHex = hashToHex(hash);
+        hashHex = hashToHex(hashDeliverable(buf));
       }
 
       return res.json({
-        projectId,
-        milestoneIndex,
+        projectId: project.id,
         deliverableHashHex: hashHex,
-        message: "Submit this hash to the Soroban contract (submit_milestone) from the freelancer wallet.",
+        contractId: project.contractId,
+        message: "Call contract.submit_delivery(freelancer, hash) from freelancer wallet.",
       });
     } catch (e) {
       return res.status(500).json({ error: (e as Error).message });
@@ -181,28 +184,24 @@ router.post(
   }
 );
 
-// ---------- POST /milestone/approve ----------
-// Acknowledge; actual approval is on-chain by business.
-router.post("/milestone/approve", (req: Request, res: Response) => {
-  const body = req.body as MilestoneApproveBody;
-  const project = getProject(body.projectId);
+// ---------- POST /project/:id/approve ----------
+router.post("/project/:id/approve", (req: Request, res: Response) => {
+  const project = getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
   return res.json({
-    message: "Call contract.approve_milestone(business, index) from the business wallet.",
-    projectId: body.projectId,
-    milestoneIndex: body.milestoneIndex,
+    message: "Call contract.approve_delivery(business) from hiring person wallet.",
+    projectId: project.id,
     contractId: project.contractId,
   });
 });
 
-// ---------- POST /project/refund ----------
-router.post("/project/refund", (req: Request, res: Response) => {
-  const body = req.body as RefundBody;
-  const project = getProject(body.projectId);
+// ---------- POST /project/:id/refund ----------
+router.post("/project/:id/refund", (req: Request, res: Response) => {
+  const project = getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
   return res.json({
-    message: "Call contract.refund_if_deadline_missed() (anyone can call after final deadline passed).",
-    projectId: body.projectId,
+    message: "Call contract.refund_if_deadline_missed() after delivery deadline passed.",
+    projectId: project.id,
     contractId: project.contractId,
   });
 });
