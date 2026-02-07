@@ -107,7 +107,10 @@ export { rpcUrl, networkPassphrase };
 // FreelanceContract
 // ---------------------------------------------------------------------------
 
-/** create_escrow(client, freelancer, token, amount, soft_deadline) -> u64 job_id. Transfers funds in one tx. */
+/**
+ * create_escrow(client, freelancer, token, amount, soft_deadline) -> u64 job_id.
+ * Transfers funds in one transaction. Client must have approved token spending first.
+ */
 export async function createEscrow(
   sourcePublicKey: string,
   contractId: string,
@@ -129,6 +132,9 @@ export async function createEscrow(
   return { txHash: hash, jobId };
 }
 
+/**
+ * complete_job(job_id) -> () Client approves work; pays freelancer (with penalty if past soft_deadline).
+ */
 export async function completeJob(
   sourcePublicKey: string,
   contractId: string,
@@ -137,6 +143,9 @@ export async function completeJob(
   return invokeContract(sourcePublicKey, contractId, "complete_job", [jobId]);
 }
 
+/**
+ * client_cancel_within_6h(job_id) -> () Refund if within 6 hours of funding.
+ */
 export async function clientCancelWithin6h(
   sourcePublicKey: string,
   contractId: string,
@@ -145,6 +154,9 @@ export async function clientCancelWithin6h(
   return invokeContract(sourcePublicKey, contractId, "client_cancel_within_6h", [jobId]);
 }
 
+/**
+ * claim_refund_after_hard_deadline(job_id) -> () Refund to client after hard deadline passes.
+ */
 export async function claimRefundAfterHardDeadline(
   sourcePublicKey: string,
   contractId: string,
