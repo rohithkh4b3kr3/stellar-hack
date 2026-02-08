@@ -14,7 +14,6 @@ export interface ProjectRecord {
   title: string;
   description: string;
   totalAmount: string;
-  /** Fixed 30% advance. */
   advanceAmount: string;
   deliveryDeadlineTs: number;
   verificationWindowSecs: number;
@@ -45,9 +44,4 @@ export interface SetJobBody {
 
 export interface ApplyBody {
   freelancerAddress: string;
-}
-
-export interface SubmitBody {
-  deliverableBase64?: string;
-  deliverableHashHex?: string;
 }

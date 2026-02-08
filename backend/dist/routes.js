@@ -1,13 +1,12 @@
 /**
  * REST API: Trustless Freelance Escrow
- * Backend enforces x402, hashes deliverables, never holds funds.
+ * stellar-contract: create_escrow, complete_job, cancel_within_6h, refund_after_hard_deadline, get_job
+ * Backend never holds funds; metadata only. Set ESCROW_CONTRACT_ID and optionally DATABASE_URL.
  */
 import { Router } from "express";
-import multer from "multer";
 import { saveProject, getProject, listProjects } from "./store.js";
-import { hashDeliverable, hashToHex, randomId, verifySignature } from "./crypto.js";
-import { getJobState, getJobInfo } from "./soroban.js";
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+import { randomId, verifySignature } from "./crypto.js";
+import { getJobState, getJobInfo, simulateCreateEscrow } from "./soroban.js";
 const router = Router();
 const ESCROW_CONTRACT_ID = process.env.ESCROW_CONTRACT_ID ?? "";
 function projectId(req) {
@@ -55,7 +54,7 @@ router.post("/project/create", async (req, res) => {
             createdAt: Date.now(),
         };
         await saveProject(project);
-        return res.status(201).json({ projectId: id, ...withContractId({ ...project }) });
+        return res.status(201).json(withContractId({ ...project }));
     }
     catch (e) {
         return res.status(500).json({ error: e.message });
@@ -128,6 +127,23 @@ router.post("/project/:id/set-job", async (req, res) => {
     await saveProject(project);
     return res.json(withContractId(project));
 });
+// ---------- POST /preflight/escrow ----------
+router.post("/preflight/escrow", async (req, res) => {
+    try {
+        const { client, freelancer, tokenId, amount, softDeadline } = req.body;
+        if (!client || !freelancer || !tokenId || amount == null || softDeadline == null) {
+            return res.status(400).json({ ok: false, error: "Missing client, freelancer, tokenId, amount, or softDeadline" });
+        }
+        if (!ESCROW_CONTRACT_ID) {
+            return res.status(400).json({ ok: false, error: "ESCROW_CONTRACT_ID not set" });
+        }
+        const result = await simulateCreateEscrow(ESCROW_CONTRACT_ID, client, freelancer, tokenId, String(amount), Number(softDeadline));
+        return res.json(result);
+    }
+    catch (e) {
+        return res.status(500).json({ ok: false, error: e.message });
+    }
+});
 // ---------- GET /project/:id/start ----------
 // FreelanceContract: JobState Funded=0, Completed=1, Cancelled=2, Refunded=3
 router.get("/project/:id/start", async (req, res) => {
@@ -144,7 +160,7 @@ router.get("/project/:id/start", async (req, res) => {
         if (!project.jobId) {
             return res.status(200).json({
                 status: "payment_required",
-                message: "Pay full amount via create_escrow. Client transfers funds in one transaction.",
+                message: "Pay full amount via create_escrow. Client transfers funds in one tx.",
                 totalAmount: project.totalAmount,
                 asset: project.tokenId,
                 contractAddress: contractId,
@@ -163,7 +179,7 @@ router.get("/project/:id/start", async (req, res) => {
         if (state === 0) {
             return res.status(200).json({
                 status: "ready",
-                message: "Full amount in escrow; freelancer can deliver. Client can complete_job (on time=100%, late=5% per day penalty) or cancel within 6h.",
+                message: "Full amount in escrow. Client can complete_job or cancel_within_6h.",
                 contractId,
                 projectId: project.id,
                 jobId: project.jobId,
@@ -193,60 +209,5 @@ router.get("/project/:id/start", async (req, res) => {
     catch (e) {
         return res.status(500).json({ error: e.message });
     }
-});
-// ---------- POST /project/:id/submit ----------
-router.post("/project/:id/submit", upload.single("deliverable"), async (req, res) => {
-    try {
-        const project = await getProject(projectId(req));
-        if (!project)
-            return res.status(404).json({ error: "Project not found" });
-        if (!project.contractId)
-            return res.status(400).json({ error: "Contract not deployed" });
-        const body = (req.body || {});
-        const deliverableHashHex = body.deliverableHashHex ?? req.body?.deliverableHashHex;
-        let hashHex;
-        if (deliverableHashHex && /^[0-9a-fA-F]{64}$/.test(deliverableHashHex)) {
-            hashHex = deliverableHashHex;
-        }
-        else {
-            const file = req.file;
-            const buf = file?.buffer ?? (body.deliverableBase64 ? Buffer.from(body.deliverableBase64, "base64") : null);
-            if (!buf || buf.length === 0) {
-                return res.status(400).json({ error: "Provide deliverable (file upload, deliverableBase64, or deliverableHashHex)" });
-            }
-            hashHex = hashToHex(hashDeliverable(buf));
-        }
-        return res.json({
-            projectId: project.id,
-            deliverableHashHex: hashHex,
-            contractId: project.contractId,
-            message: "Call contract.submit_delivery(freelancer, hash) from freelancer wallet.",
-        });
-    }
-    catch (e) {
-        return res.status(500).json({ error: e.message });
-    }
-});
-// ---------- POST /project/:id/approve ----------
-router.post("/project/:id/approve", async (req, res) => {
-    const project = await getProject(projectId(req));
-    if (!project)
-        return res.status(404).json({ error: "Project not found" });
-    return res.json({
-        message: "Call contract.approve_delivery(business) from hiring person wallet.",
-        projectId: project.id,
-        contractId: project.contractId,
-    });
-});
-// ---------- POST /project/:id/refund ----------
-router.post("/project/:id/refund", async (req, res) => {
-    const project = await getProject(projectId(req));
-    if (!project)
-        return res.status(404).json({ error: "Project not found" });
-    return res.json({
-        message: "Call contract.refund_if_deadline_missed() after delivery deadline passed.",
-        projectId: project.id,
-        contractId: project.contractId,
-    });
 });
 export default router;

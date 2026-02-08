@@ -126,14 +126,3 @@ export async function setProjectContract(projectId: string, contractId: string):
   }
   return r.json();
 }
-
-export async function submitDelivery(projectId: string, file: File): Promise<{ deliverableHashHex: string; contractId: string }> {
-  const form = new FormData();
-  form.set("deliverable", file);
-  const r = await fetch(`${API}/project/${projectId}/submit`, { method: "POST", body: form });
-  if (!r.ok) {
-    const e = await r.json().catch(() => ({}));
-    throw new Error(e.error || r.statusText);
-  }
-  return r.json();
-}

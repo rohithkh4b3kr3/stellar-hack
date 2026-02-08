@@ -1,9 +1,7 @@
 /**
- * B2B Freelance Escrow API
- * - Enforces HTTP 402 for advance payment
- * - Never holds funds; all money is in the Soroban contract
- * - Wallet = identity (signature verification, no signup)
- * - Set DATABASE_URL for PostgreSQL; otherwise in-memory store.
+ * gigX Freelance Escrow API
+ * - Never holds funds; stellar-contract: create_escrow, complete_job, cancel_within_6h, refund_after_hard_deadline
+ * - Set ESCROW_CONTRACT_ID (and optionally XLM_TOKEN_ID, DATABASE_URL). Set SOROBAN_RPC_URL for testnet.
  */
 import "dotenv/config";
 import express from "express";
@@ -19,19 +17,18 @@ app.use(express.json({ limit: "2mb" }));
 
 app.get("/", (_req, res) => {
   res.json({
-    name: "B2B Freelance Escrow API",
+    name: "gigX Freelance Escrow API",
     version: "1.0.0",
     endpoints: [
+      "POST /preflight/escrow",
       "POST /project/create",
       "GET /projects",
       "GET /project/:id",
       "POST /project/:id/apply",
       "POST /project/:id/accept",
       "POST /project/:id/set-contract",
-      "GET /project/:id/start (402)",
-      "POST /project/:id/submit",
-      "POST /project/:id/approve",
-      "POST /project/:id/refund",
+      "POST /project/:id/set-job",
+      "GET /project/:id/start",
     ],
   });
 });

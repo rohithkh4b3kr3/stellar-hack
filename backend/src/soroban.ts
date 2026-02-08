@@ -1,8 +1,9 @@
 /**
- * Soroban contract read-only helpers.
- * FreelanceContract: create_escrow, complete_job, client_cancel_within_6h, claim_refund_after_hard_deadline, get_job
+ * Soroban stellar-contract read-only helpers.
+ * get_job(job_id) -> Job { client, freelancer, token, amount, soft_deadline, hard_deadline, funded_at, state }.
+ * JobState: Funded=0, Completed=1, Cancelled=2, Refunded=3.
  */
-import { Account, Contract, TransactionBuilder, Networks, Keypair, scValToNative, nativeToScVal } from "@stellar/stellar-sdk";
+import { Account, Contract, TransactionBuilder, Networks, Keypair, scValToNative, nativeToScVal, Address } from "@stellar/stellar-sdk";
 import { Server, Api } from "@stellar/stellar-sdk/rpc";
 
 const rpcUrl = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -100,6 +101,49 @@ export async function getJobInfo(contractId: string, jobId: number): Promise<{
     return { funded_at, soft_deadline, hard_deadline };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Simulate create_escrow (no signing). Returns failure reason if simulation fails.
+ */
+export async function simulateCreateEscrow(
+  contractId: string,
+  client: string,
+  freelancer: string,
+  tokenId: string,
+  amount: string,
+  softDeadline: number
+): Promise<{ ok: boolean; error?: string }> {
+  const s = getServer();
+  const contract = new Contract(contractId);
+  const clientAccount = new Account(client, "0");
+  const tx = new TransactionBuilder(clientAccount, {
+    fee: "10000",
+    networkPassphrase,
+  })
+    .addOperation(
+      contract.call(
+        "create_escrow",
+        nativeToScVal(Address.fromString(client)),
+        nativeToScVal(Address.fromString(freelancer)),
+        nativeToScVal(Address.fromString(tokenId)),
+        nativeToScVal(BigInt(amount)),
+        nativeToScVal(BigInt(softDeadline))
+      )
+    )
+    .setTimeout(180)
+    .build();
+  try {
+    const result = await s.simulateTransaction(tx);
+    if (Api.isSimulationError(result)) {
+      const err = (result as Api.SimulateTransactionErrorResponse).error;
+      const msg = typeof err === "string" ? err : (err as { message?: string })?.message ?? String(err);
+      return { ok: false, error: msg };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
   }
 }
 

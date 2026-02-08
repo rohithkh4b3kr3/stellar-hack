@@ -15,6 +15,7 @@ const CREATE_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   contract_id TEXT,
+  job_id BIGINT,
   business_address TEXT NOT NULL,
   freelancer_address TEXT,
   token_id TEXT NOT NULL,
@@ -38,11 +39,13 @@ export async function initDb() {
     pool = new Pool({ connectionString: url });
     try {
         await pool.query(CREATE_TABLE);
+        await pool.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS job_id BIGINT;");
         console.log("PostgreSQL connected and schema ready.");
     }
     catch (e) {
         console.error("PostgreSQL init failed:", e);
-        throw e;
+        await pool.end();
+        pool = null;
     }
 }
 export async function closeDb() {

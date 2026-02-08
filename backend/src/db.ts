@@ -49,7 +49,8 @@ export async function initDb(): Promise<void> {
     console.log("PostgreSQL connected and schema ready.");
   } catch (e) {
     console.error("PostgreSQL init failed:", e);
-    throw e;
+    await pool.end();
+    pool = null;
   }
 }
 
