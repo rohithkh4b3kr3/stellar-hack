@@ -11,7 +11,7 @@ Smart contract escrow for clients and freelancers on Stellar Soroban. Funds are 
 ## Repo Structure
 
 - `frontend/` – React + Vite client (Freighter wallet, project list/detail, escrow actions)
-- `backend/` – Express API (project lifecycle, preflight, job status)
+- `backend/` – Express API (project lifecycle, preflight, socket.io for realtime chat ,job status)
 - `soroban-contract/` – Soroban escrow contract (`contracts/hello-world/`)
 
 ---
