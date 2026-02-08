@@ -1,9 +1,6 @@
 import crypto from "node:crypto";
 import { Keypair } from "@stellar/stellar-sdk";
 
-/**
- * SHA-256 hash of deliverable bytes. Used for milestone and final delivery.
- */
 export function hashDeliverable(data: Buffer): Buffer {
   return crypto.createHash("sha256").update(data).digest();
 }
@@ -16,10 +13,6 @@ export function hexToBuffer(hex: string): Buffer {
   return Buffer.from(hex, "hex");
 }
 
-/**
- * Verify that message was signed by the given Stellar public key (G...).
- * Message is typically a payload (e.g. projectId + timestamp) that the client signed with Freighter.
- */
 export function verifySignature(message: string, signatureBase64: string, publicKey: string): boolean {
   try {
     const keypair = Keypair.fromPublicKey(publicKey);

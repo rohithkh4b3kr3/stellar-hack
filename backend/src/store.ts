@@ -1,7 +1,3 @@
-/**
- * Project store: PostgreSQL when DATABASE_URL is set, otherwise in-memory.
- * Backend never holds funds; metadata only.
- */
 import { getPool } from "./db.js";
 import type { ProjectRecord } from "./types.js";
 

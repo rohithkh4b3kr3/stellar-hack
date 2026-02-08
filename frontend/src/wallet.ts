@@ -1,6 +1,3 @@
-/**
- * Freighter wallet via @stellar/freighter-api (bundled - avoids tracking prevention).
- */
 import { isConnected, requestAccess, getAddress } from "@stellar/freighter-api";
 
 export async function isFreighterAvailable(): Promise<boolean> {
@@ -13,7 +10,6 @@ export async function isFreighterAvailable(): Promise<boolean> {
   }
 }
 
-/** Connect (request access) and return public key. */
 export async function connectFreighter(): Promise<string> {
   const result = await requestAccess();
   if ("error" in result && result.error) {
@@ -22,7 +18,6 @@ export async function connectFreighter(): Promise<string> {
   return (result as { address: string }).address;
 }
 
-/** Get public key if already authorized. */
 export async function getPublicKey(): Promise<string | null> {
   try {
     const result = await getAddress();

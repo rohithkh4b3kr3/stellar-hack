@@ -25,9 +25,6 @@ export function LandingPage({
     <div className="min-h-screen bg-[#0c0c0c] flex items-center justify-center px-4 py-16">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-10 md:p-12 border border-neutral-200/50">
         <div className="text-center mb-10">
-          <div className="w-14 h-14 bg-neutral-900 text-white rounded-xl flex items-center justify-center font-display text-2xl font-bold mx-auto mb-4">
-            gig
-          </div>
           <h1 className="font-display text-4xl md:text-5xl font-bold text-neutral-900 mb-3 tracking-tight">
             gigX
           </h1>

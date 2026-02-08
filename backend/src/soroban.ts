@@ -1,8 +1,3 @@
-/**
- * Soroban stellar-contract read-only helpers.
- * get_job(job_id) -> Job { client, freelancer, token, amount, soft_deadline, hard_deadline, funded_at, state }.
- * JobState: Funded=0, Completed=1, Cancelled=2, Refunded=3.
- */
 import { Account, Contract, TransactionBuilder, Networks, Keypair, scValToNative, nativeToScVal, Address } from "@stellar/stellar-sdk";
 import { Server, Api } from "@stellar/stellar-sdk/rpc";
 
@@ -19,7 +14,6 @@ function getServer(): Server {
 const dummyKeypair = Keypair.random();
 const dummyAccount = new Account(dummyKeypair.publicKey(), "0");
 
-/** JobState: Funded=0, Completed=1, Cancelled=2, Refunded=3 */
 const JOB_STATE_MAP: Record<string, number> = {
   Funded: 0,
   Completed: 1,
@@ -43,9 +37,6 @@ function parseState(stateVal: unknown): number {
   return -1;
 }
 
-/**
- * Get job state from contract. get_job(job_id: u64) -> JobState (Funded=0, Completed=1, Cancelled=2, Refunded=3).
- */
 export async function getJobState(contractId: string, jobId: number): Promise<number> {
   const s = getServer();
   const contract = new Contract(contractId);
@@ -63,15 +54,10 @@ export async function getJobState(contractId: string, jobId: number): Promise<nu
     if (retval == null) return -1;
     const data = scValToNative(retval) as Record<string, unknown>;
     if (data && typeof data === "object" && data.state != null) return parseState(data.state);
-  } catch {
-    // job not found or contract error
-  }
+  } catch {}
   return -1;
 }
 
-/**
- * Get job details from get_job(job_id).
- */
 export async function getJobInfo(contractId: string, jobId: number): Promise<{
   funded_at: number;
   soft_deadline: number;
@@ -104,9 +90,6 @@ export async function getJobInfo(contractId: string, jobId: number): Promise<{
   }
 }
 
-/**
- * Simulate create_escrow (no signing). Returns failure reason if simulation fails.
- */
 export async function simulateCreateEscrow(
   contractId: string,
   client: string,

@@ -1,8 +1,3 @@
-/**
- * REST API: Trustless Freelance Escrow
- * stellar-contract: create_escrow, complete_job, cancel_within_6h, refund_after_hard_deadline, get_job
- * Backend never holds funds; metadata only. Set ESCROW_CONTRACT_ID and optionally DATABASE_URL.
- */
 import { Router, Request, Response } from "express";
 import { saveProject, getProject, listProjects } from "./store.js";
 import { randomId, verifySignature } from "./crypto.js";
@@ -18,13 +13,11 @@ function projectId(req: Request): string {
   return Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
 }
 
-/** Inject global escrow contract ID into project for response. */
 function withContractId<T extends { contractId?: string }>(project: T): T {
   const contractId = ESCROW_CONTRACT_ID || project.contractId;
   return { ...project, contractId };
 }
 
-// ---------- POST /project/create ----------
 router.post("/project/create", async (req: Request, res: Response) => {
   try {
     const body = req.body as CreateProjectBody;
@@ -56,9 +49,9 @@ router.post("/project/create", async (req: Request, res: Response) => {
       title,
       description: description ?? "",
       totalAmount: String(totalAmount),
-      advanceAmount: String(totalAmount), // 100% upfront (no advance split)
+      advanceAmount: String(totalAmount),
       deliveryDeadlineTs,
-      verificationWindowSecs: verificationWindowSecs ?? 259200, // 3 days
+      verificationWindowSecs: verificationWindowSecs ?? 259200,
       applicants: [] as string[],
       createdAt: Date.now(),
     };
@@ -69,20 +62,17 @@ router.post("/project/create", async (req: Request, res: Response) => {
   }
 });
 
-// ---------- GET /projects ----------
 router.get("/projects", async (_req: Request, res: Response) => {
   const list = await listProjects();
   return res.json(list.map(withContractId));
 });
 
-// ---------- GET /project/:id ----------
 router.get("/project/:id", async (req: Request, res: Response) => {
   const project = await getProject(projectId(req));
   if (!project) return res.status(404).json({ error: "Project not found" });
   return res.json(withContractId(project));
 });
 
-// ---------- POST /project/:id/apply ----------
 router.post("/project/:id/apply", async (req: Request, res: Response) => {
   const body = req.body as ApplyBody;
   const project = await getProject(projectId(req));
@@ -95,7 +85,6 @@ router.post("/project/:id/apply", async (req: Request, res: Response) => {
   return res.status(200).json(withContractId(project));
 });
 
-// ---------- POST /project/:id/accept ----------
 router.post("/project/:id/accept", async (req: Request, res: Response) => {
   const body = req.body as ApplyBody;
   const project = await getProject(projectId(req));
@@ -108,7 +97,6 @@ router.post("/project/:id/accept", async (req: Request, res: Response) => {
   return res.json(withContractId(project));
 });
 
-// ---------- POST /project/:id/set-contract ----------
 router.post("/project/:id/set-contract", async (req: Request, res: Response) => {
   const body = req.body as SetContractBody;
   const project = await getProject(projectId(req));
@@ -119,7 +107,6 @@ router.post("/project/:id/set-contract", async (req: Request, res: Response) => 
   return res.json(withContractId(project));
 });
 
-// ---------- POST /project/:id/set-job ----------
 router.post("/project/:id/set-job", async (req: Request, res: Response) => {
   const body = req.body as SetJobBody;
   const project = await getProject(projectId(req));
@@ -130,7 +117,6 @@ router.post("/project/:id/set-job", async (req: Request, res: Response) => {
   return res.json(withContractId(project));
 });
 
-// ---------- POST /preflight/escrow ----------
 router.post("/preflight/escrow", async (req: Request, res: Response) => {
   try {
     const { client, freelancer, tokenId, amount, softDeadline } = req.body as {
@@ -153,8 +139,6 @@ router.post("/preflight/escrow", async (req: Request, res: Response) => {
   }
 });
 
-// ---------- GET /project/:id/start ----------
-// FreelanceContract: JobState Funded=0, Completed=1, Cancelled=2, Refunded=3
 router.get("/project/:id/start", async (req: Request, res: Response) => {
   try {
     const project = await getProject(projectId(req));
@@ -163,7 +147,6 @@ router.get("/project/:id/start", async (req: Request, res: Response) => {
     const contractId = ESCROW_CONTRACT_ID || project.contractId;
     if (!contractId) return res.status(400).json({ error: "ESCROW_CONTRACT_ID not set. Deploy contract once and set in backend .env." });
 
-    // If no jobId yet, client must call create_escrow (funds in one tx)
     if (!project.jobId) {
       return res.status(200).json({
         status: "payment_required",
@@ -183,7 +166,6 @@ router.get("/project/:id/start", async (req: Request, res: Response) => {
     }
     const jobInfo = await getJobInfo(contractId, project.jobId).catch(() => null);
 
-    // Funded=0: ready for work
     if (state === 0) {
       return res.status(200).json({
         status: "ready",
@@ -197,7 +179,6 @@ router.get("/project/:id/start", async (req: Request, res: Response) => {
         jobHardDeadline: jobInfo?.hard_deadline,
       });
     }
-    // Completed=1, Cancelled=2, Refunded=3
     if (state === 1) return res.status(200).json({ status: "completed", contractId, projectId: project.id, jobId: project.jobId, contractState: 1 });
     if (state === 2) return res.status(200).json({ status: "cancelled", contractId, projectId: project.id, jobId: project.jobId, contractState: 2 });
     if (state === 3) return res.status(200).json({ status: "refunded", contractId, projectId: project.id, jobId: project.jobId, contractState: 3 });

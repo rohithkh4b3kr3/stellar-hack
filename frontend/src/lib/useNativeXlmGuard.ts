@@ -7,10 +7,6 @@ import {
   stroopsToXlm,
 } from "./token";
 
-/**
- * Native XLM reserve guard for escrow submission.
- * Enforces: spendable = balance - 1 XLM reserve, canSubmit = amount >= 2 XLM && spendable >= amount.
- */
 export function useNativeXlmGuard(
   tokenId: string,
   amount: string,
@@ -54,7 +50,7 @@ export function useNativeXlmGuard(
   let errorMessage: string | null = null;
   if (isNative && enabled) {
     if (!spendableLoaded || spendable === "") {
-      errorMessage = null; // still loading
+      errorMessage = null;
     } else if (!amountOk) {
       errorMessage = "Native XLM escrow requires at least 2 XLM.";
     } else if (!canSubmitNativeXlmEscrow(spendable, amount)) {

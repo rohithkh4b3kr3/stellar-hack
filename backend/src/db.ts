@@ -1,7 +1,3 @@
-/**
- * PostgreSQL connection and schema.
- * Set DATABASE_URL or leave unset to skip DB (in-memory fallback in store).
- */
 import pg from "pg";
 
 const { Pool } = pg;

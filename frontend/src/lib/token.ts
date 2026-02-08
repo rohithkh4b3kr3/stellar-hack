@@ -1,8 +1,3 @@
-/**
- * Token and balance utilities for Soroban.
- * Native XLM: reserve rules, spendable balance, min escrow.
- * Contract MIN_AMOUNT = 1000 stroops. Native XLM min escrow = 20_000_000 (2 XLM).
- */
 import { Contract, TransactionBuilder, Account, Keypair, nativeToScVal, scValToNative, Address as StellarAddress, Networks } from "@stellar/stellar-sdk";
 import { Server, Api } from "@stellar/stellar-sdk/rpc";
 
@@ -19,29 +14,21 @@ function getServer(): Server {
 const dummyKp = Keypair.random();
 const dummyAccount = new Account(dummyKp.publicKey(), "0");
 
-/** Stellar base reserve: 0.5 XLM = 5M stroops. Min balance for account = 2 * reserve = 1 XLM = 10M stroops. */
-export const XLM_RESERVE_STROOPS = 10_000_000; // 1 XLM
-
-/** Minimum escrow amount for native XLM (2 XLM). Below this, token.transfer often traps. */
+export const XLM_RESERVE_STROOPS = 10_000_000;
 export const XLM_MIN_ESCROW_STROOPS = 20_000_000;
 
-/** Contract MIN_AMOUNT */
 export const CONTRACT_MIN_AMOUNT = 1_000;
 
-/** Native XLM decimals */
 export const XLM_DECIMALS = 7;
 
-/** Stroops per XLM */
 export const STROOPS_PER_XLM = 10_000_000;
 
-/** Convert stroops (string or number) to XLM for display. */
 export function stroopsToXlm(stroops: string | number, decimals = 2): string {
   const n = typeof stroops === "string" ? parseInt(stroops, 10) : stroops;
   if (isNaN(n) || n < 0) return "0";
   return (n / STROOPS_PER_XLM).toFixed(decimals);
 }
 
-/** Convert XLM (human input) to stroops (string). */
 export function xlmToStroops(xlm: string | number): string {
   const n = typeof xlm === "string" ? parseFloat(xlm) : xlm;
   if (isNaN(n) || n < 0) return "0";
@@ -54,16 +41,13 @@ export function isNativeXlm(tokenId: string): boolean {
 }
 
 export function getTokenDecimals(tokenId: string): number {
-  return isNativeXlm(tokenId) ? XLM_DECIMALS : 7; // default 7 for custom tokens
+  return isNativeXlm(tokenId) ? XLM_DECIMALS : 7;
 }
 
 export function getTokenName(tokenId: string): string {
   return isNativeXlm(tokenId) ? "native" : "custom";
 }
 
-/**
- * Fetch token balance for address (simulate, no signing).
- */
 export async function getTokenBalance(tokenId: string, address: string): Promise<string> {
   const s = getServer();
   const contract = new Contract(tokenId);
@@ -86,9 +70,6 @@ export async function getTokenBalance(tokenId: string, address: string): Promise
   }
 }
 
-/**
- * Max spendable = balance - reserve (for native XLM). For non-native, maxSpendable = balance.
- */
 export async function getMaxSpendable(tokenId: string, address: string): Promise<string> {
   const balance = await getTokenBalance(tokenId, address);
   const bal = BigInt(balance);
@@ -100,11 +81,6 @@ export async function getMaxSpendable(tokenId: string, address: string): Promise
   return balance;
 }
 
-/**
- * Sync guard: can user submit native XLM escrow?
- * spendable = balance - BASE_RESERVE (from getMaxSpendable)
- * canSubmit = amount >= MIN_ESCROW && spendable >= amount
- */
 export function canSubmitNativeXlmEscrow(spendable: string, amount: string): boolean {
   const spendBig = BigInt(spendable || "0");
   const amountBig = BigInt(amount || "0");
@@ -114,13 +90,9 @@ export function canSubmitNativeXlmEscrow(spendable: string, amount: string): boo
   );
 }
 
-/** Error message when native XLM escrow validation fails */
 export const NATIVE_XLM_RESERVE_ERROR =
   "Not enough spendable XLM. Stellar reserves 1 XLM minimum. Escrow at least 2 XLM.";
 
-/**
- * Preflight: validate create_escrow params before signing.
- */
 export async function preflightCreateEscrow(
   wallet: string,
   tokenId: string,

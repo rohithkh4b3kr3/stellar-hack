@@ -1,6 +1,15 @@
 import { Icons } from "./Icons";
 
-export type View = "landing" | "home" | "create" | "project" | "applicants" | "search" | "history";
+export type View =
+  | "landing"
+  | "home"
+  | "create"
+  | "project"
+  | "applicants"
+  | "search"
+  | "history"
+  | "transactions"
+  | "my-projects";
 export type Role = "hiring" | "freelancer" | null;
 
 function NavItem({
@@ -45,17 +54,20 @@ export function Sidebar({
   return (
     <aside className="w-64 bg-neutral-900 text-white flex flex-col border-r border-neutral-800/80">
       <div className="p-6 border-b border-neutral-800 flex items-center gap-3">
-        <div className="w-10 h-10 bg-white text-neutral-900 rounded-xl flex items-center justify-center font-display text-lg font-bold">
-          gig
-        </div>
-        <h2 className="font-display text-xl font-bold tracking-tight">gigX</h2>
+        <h1 className="font-display text-4xl font-bold tracking-tight">gigX</h1>
       </div>
 
       <nav className="flex-1 py-6 space-y-1 px-3">
         <NavItem icon={<Icons.Home />} label="Home" active={view === "home"} onClick={() => setView("home")} />
+        <NavItem
+          icon={<Icons.CheckCircle />}
+          label="My Projects"
+          active={view === "my-projects"}
+          onClick={() => setView("my-projects")}
+        />
         {role === "hiring" && (
           <>
-            <NavItem icon={<Icons.Plus />} label="Create Project" active={view === "create"} onClick={() => setView("create")} />
+            <NavItem icon={<Icons.Plus />} label="Post job" active={view === "create"} onClick={() => setView("create")} />
             <NavItem
               icon={<Icons.Users />}
               label="Applicants"
@@ -66,6 +78,7 @@ export function Sidebar({
         )}
         <NavItem icon={<Icons.Search />} label="Browse" active={view === "search"} onClick={() => setView("search")} />
         <NavItem icon={<Icons.Clock />} label="History" active={view === "history"} onClick={() => setView("history")} />
+        <NavItem icon={<Icons.Activity />} label="Transactions" active={view === "transactions"} onClick={() => setView("transactions")} />
       </nav>
 
       <div className="p-4 border-t border-neutral-800 space-y-3">

@@ -12,6 +12,8 @@ import {
   ApplicantsView,
   SearchView,
   HistoryView,
+  TransactionsView,
+  MyProjectsView,
   type View,
   type Role,
 } from "./components";
@@ -94,9 +96,7 @@ export default function App() {
         setProject(p);
         const start = await projectStart(projectId);
         setStartInfo(start);
-      } catch (_) {
-        // ignore polling errors
-      }
+        } catch (_) {}
     }, 12_000);
     return () => clearInterval(intervalId);
   }, [view, project?.id]);
@@ -126,11 +126,7 @@ export default function App() {
           <div className="flex-1 overflow-y-auto bg-[#fafafa]">
             {view === "home" && (
               <HomeView
-                role={role}
                 projects={projects}
-                wallet={wallet}
-                loadProjects={loadProjects}
-                openProject={openProject}
               />
             )}
             {view === "create" && (
@@ -177,6 +173,15 @@ export default function App() {
                 openProject={openProject}
               />
             )}
+            {view === "my-projects" && (
+              <MyProjectsView
+                role={role}
+                projects={projects}
+                wallet={wallet}
+                openProject={openProject}
+              />
+            )}
+            {view === "transactions" && <TransactionsView />}
           </div>
         </main>
       </div>

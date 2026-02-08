@@ -8,6 +8,7 @@ import { BackButton } from "./BackButton";
 import { DetailItem } from "./DetailItem";
 import { ApplicantItem } from "./ApplicantItem";
 import { ActionsList } from "./ActionsList";
+import { ChatPanel } from "./ChatPanel";
 import { EscrowProgress } from "./EscrowProgress";
 import { CopyButton } from "./CopyButton";
 import { stroopsToXlm } from "../lib/token";
@@ -174,6 +175,16 @@ export function ProjectDetailView({
           setError={setError}
           refreshProject={refreshProject}
         />
+
+        {project.freelancerAddress && (isHiring || isFreelancer) && (
+          <div className="mt-8">
+            <ChatPanel
+              projectId={project.id}
+              wallet={wallet}
+              peer={isHiring ? project.freelancerAddress : project.businessAddress}
+            />
+          </div>
+        )}
         <div className="mt-8 flex items-center justify-between">
           <button
             className="btn-secondary px-5 py-2.5 text-sm font-semibold inline-flex items-center gap-2"

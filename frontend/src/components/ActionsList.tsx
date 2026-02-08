@@ -52,7 +52,6 @@ export function ActionsList({
 }: ActionsListProps) {
   const { showToast } = useToast();
   
-  // --- STATE ---
   const [actionLoading, setActionLoading] = useState<"pay" | "complete" | "cancel6h" | "refund" | null>(null);
   const [txHash, setTxHash] = useState<string>("");
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -61,7 +60,6 @@ export function ActionsList({
     { id: string; type: string; hash: string; amount: string; ts: number }[]
   >([]);
 
-  // --- DERIVED STATE ---
   const isHiring = project.businessAddress === wallet;
   const isFreelancer = project.freelancerAddress === wallet;
   const storageKey = `gigx:tx:${project.id}`;
@@ -72,9 +70,7 @@ export function ActionsList({
       if (!raw) return;
       const parsed = JSON.parse(raw) as { id: string; type: string; hash: string; amount: string; ts: number }[];
       setTxHistory(parsed);
-    } catch {
-      // ignore storage errors
-    }
+    } catch {}
   }, [storageKey]);
 
   const addTxEntry = (entry: { type: string; hash: string; amount: string }) => {
@@ -83,28 +79,22 @@ export function ActionsList({
     setTxHistory(next);
     try {
       localStorage.setItem(storageKey, JSON.stringify(next));
-    } catch {
-      // ignore storage errors
-    }
+    } catch {}
   };
   
-  // Timestamps (Seconds)
   const nowSec = Math.floor(Date.now() / 1000);
   const fundedAt = startInfo?.jobFundedAt ? Number(startInfo.jobFundedAt) : 0;
   
-  // Deadlines
-  // If job is funded, use the on-chain deadlines. Otherwise, use the project proposal deadlines.
   const softDeadline = startInfo?.jobSoftDeadline 
     ? Number(startInfo.jobSoftDeadline) 
     : project.deliveryDeadlineTs;
     
   const hardDeadline = startInfo?.jobHardDeadline 
     ? Number(startInfo.jobHardDeadline) 
-    : project.deliveryDeadlineTs + (7 * 24 * 3600); // Default +7 days logic
+    : project.deliveryDeadlineTs + (7 * 24 * 3600);
 
   const cancelWindowEnd = fundedAt > 0 ? fundedAt + SIX_HOURS_SEC : 0;
 
-  // --- CAPABILITIES ---
   const needsFunding = (startInfo?.status === "payment_required" || !startInfo);
   
   const canFund = 
@@ -121,7 +111,10 @@ export function ActionsList({
     startInfo?.status === "ready";
 
   const canCancel6h = 
-    canCompleteJob && 
+    isHiring &&
+    !!project.contractId &&
+    project.jobId != null &&
+    startInfo?.status === "ready" &&
     fundedAt > 0 && 
     nowSec < cancelWindowEnd;
 
@@ -129,10 +122,9 @@ export function ActionsList({
     isHiring && 
     !!project.contractId && 
     project.jobId != null && 
-    (startInfo?.status === "ready" || startInfo?.status === "disputed") && // Allow refund if disputed (optional logic)
+    (startInfo?.status === "ready" || startInfo?.status === "disputed") &&
     nowSec >= hardDeadline;
 
-  // --- BALANCE CHECKS ---
   const amountStroops = BigInt(project.totalAmount || "0");
   const isNative = isNativeXlm(project.tokenId);
 
@@ -156,10 +148,7 @@ export function ActionsList({
 
   const payDisabled = !!actionLoading || !canSubmitEscrow;
 
-  // --- HANDLERS ---
-
   const handleCreateEscrow = async () => {
-    // 1. Validation Checks
     if (!project.contractId || !project.freelancerAddress || !project.tokenId || !project.totalAmount) {
       setError("Missing project configuration.");
       return;
@@ -178,7 +167,6 @@ export function ActionsList({
     setTxHash("");
 
     try {
-      // 2. Preflight (Optional but recommended to catch errors early)
       const preflight = await preflightCreateEscrow(
         wallet,
         VALID_TOKEN_ID,
@@ -190,8 +178,6 @@ export function ActionsList({
         throw new Error(preflight.error ?? "Preflight validation failed");
       }
 
-      // 3. Contract Call
-      // Note: Ensure createEscrow in ../contract handles BigInt/String conversion correctly
       const { jobId, txHash: hash } = await createEscrow(
         project.contractId,
         project.freelancerAddress,
@@ -202,7 +188,6 @@ export function ActionsList({
 
       setTxHash(hash);
 
-      // 4. Backend Sync
       await setProjectJob(project.id, jobId);
       await refreshProject();
       
@@ -279,10 +264,8 @@ export function ActionsList({
     }
   };
 
-  // --- RENDER ---
   return (
     <div className="space-y-4">
-      {/* 1. SETUP STATE: Freelancer Selection */}
       {isHiring && !project.freelancerAddress && (
         <ActionCard
           title="Select Freelancer"
@@ -291,7 +274,6 @@ export function ActionsList({
         />
       )}
 
-      {/* 2. CONFIG STATE: Contract Missing */}
       {isHiring && project.freelancerAddress && !project.contractId && (
         <ActionCard
           title="System Config Required"
@@ -300,7 +282,6 @@ export function ActionsList({
         />
       )}
 
-      {/* 3. FUNDING STATE */}
       {canFund && (
         <div className="border rounded-2xl p-6 md:p-8 bg-gradient-to-br from-sky-50/90 to-white border-sky-200/80 shadow-sm relative overflow-hidden">
           <div className="relative z-10">
@@ -363,7 +344,6 @@ export function ActionsList({
         </div>
       )}
 
-      {/* MODALS */}
       <ConfirmModal
         open={showCancelModal}
         title="Cancel Escrow?"
@@ -387,11 +367,9 @@ export function ActionsList({
         loading={actionLoading === "refund"}
       />
 
-      {/* 4. ACTIVE STATE: Money on Hold */}
       {startInfo?.status === "ready" && (
         <div className="relative overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-white via-emerald-50/30 to-emerald-50/50 p-6 md:p-8 shadow-sm">
           <div className="flex flex-col md:flex-row md:items-start gap-6 relative z-10">
-            {/* Status Icon */}
             <div className="shrink-0">
               <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-inner">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -401,7 +379,6 @@ export function ActionsList({
               </div>
             </div>
 
-            {/* Content */}
             <div className="flex-1">
               <div className="flex flex-wrap justify-between items-start gap-4 mb-2">
                 <div>
@@ -416,7 +393,6 @@ export function ActionsList({
                 </div>
               </div>
 
-              {/* Info Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6 p-4 bg-white/80 rounded-xl border border-emerald-100/50">
                  <div>
                     <span className="text-xs text-neutral-400 font-bold uppercase tracking-wider block mb-1">Deliver By (Soft Deadline)</span>
@@ -432,10 +408,8 @@ export function ActionsList({
                  </div>
               </div>
 
-              {/* Client Actions */}
               {isHiring && (
                 <div className="mt-6 space-y-3">
-                   {/* Emergency Cancel */}
                    {canCancel6h ? (
                       <div className="flex items-center justify-between gap-4 bg-amber-50 p-3 rounded-lg border border-amber-100 text-sm text-amber-900">
                         <span>You can cancel for a full refund for <strong>{formatSeconds(cancelWindowEnd - nowSec)}</strong> more.</span>
@@ -453,7 +427,6 @@ export function ActionsList({
                 </div>
               )}
               
-              {/* Freelancer Info */}
               {isFreelancer && (
                  <div className="mt-4 text-sm text-neutral-600 bg-emerald-50/50 p-3 rounded-lg border border-emerald-100">
                     <p><strong>Action Required:</strong> Complete the work and submit it. Once the client approves, the {stroopsToXlm(project.totalAmount)} XLM will be released to your wallet immediately.</p>
@@ -464,7 +437,6 @@ export function ActionsList({
         </div>
       )}
 
-      {/* 5. COMPLETION ACTIONS */}
       {canCompleteJob && (
         <div className="border rounded-2xl p-6 md:p-8 bg-white border-neutral-200 shadow-sm">
           <h4 className="font-display font-bold text-lg text-neutral-900 mb-2">Finalize Job</h4>
@@ -503,7 +475,6 @@ export function ActionsList({
         </div>
       )}
 
-      {/* 6. TRANSACTION ACTIVITY */}
       <div className="border rounded-2xl p-6 md:p-7 bg-white border-neutral-200/80 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h4 className="font-display font-bold text-lg text-neutral-900">Transaction Activity</h4>

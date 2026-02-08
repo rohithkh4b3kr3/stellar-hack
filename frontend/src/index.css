@@ -91,6 +91,24 @@
   .loading-spinner {
     @apply inline-block border-2 border-neutral-300 border-t-neutral-900 rounded-full animate-spin;
   }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.35);
+    backdrop-filter: blur(18px);
+  }
+
+  .hud-grid {
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .animate-marquee {
+    animation: marquee 18s linear infinite;
+  }
 }
 
 @layer utilities {
@@ -110,6 +128,18 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.85; }
   }
+  @keyframes marquee-diagonal {
+    0% { transform: translateX(-5%); }
+    100% { transform: translateX(5%); }
+  }
+  @keyframes marquee-diagonal-slow {
+    0% { transform: translateX(-8%); }
+    100% { transform: translateX(8%); }
+  }
+  @keyframes marquee {
+    0% { transform: translateX(0%); }
+    100% { transform: translateX(-50%); }
+  }
   .animate-in {
     animation-duration: 300ms;
     animation-fill-mode: both;
@@ -119,9 +149,57 @@
   .slide-in-from-right { animation-name: slide-in-from-right; }
   .zoom-in-95 { animation-name: zoom-in-95; }
   .animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+  .home-grid {
+    background-image:
+      linear-gradient(to right, rgba(15, 23, 42, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(circle at center, rgba(0,0,0,0.6), transparent 70%);
+  }
+  .diagonal-track {
+    display: flex;
+    gap: 24px;
+    white-space: nowrap;
+    color: rgba(15, 23, 42, 0.35);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    animation: marquee-diagonal 8s ease-in-out infinite alternate;
+  }
+  .diagonal-track-slow {
+    animation-delay: 2s;
+    animation-name: marquee-diagonal-slow;
+  }
+  .diagonal-text {
+    padding-right: 24px;
+  }
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #e5e5e5; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #d4d4d4; }
+
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 30s linear infinite;
+}
+
+.hud-grid {
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+.glass-card {
+  background: rgba(15, 15, 15, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
